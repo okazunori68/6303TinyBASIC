@@ -1,0 +1,65 @@
+; *
+; * HD6303R Internal Registers
+; *
+DDR1    .eq     $00             ; Port1 Data Direction Register
+DDR2    .eq     $01             ; Port2 Data Direction Register
+PORT1   .eq     $02             ; Port1 Data Register
+PORT2   .eq     $03             ; Port2 Data Register
+TCSR    .eq     $08             ; Timer Control and Status Register
+FRC     .eq     $09             ; Free Running Counter
+FRCH    .eq     $09             ; Free Running Counter (High Byte)
+FRCL    .eq     $0a             ; Free Running Counter (Low Byte)
+OCR     .eq     $0b             ; Output Compare Register
+OCRH    .eq     $0b             ; Output Compare Register (High Byte)
+OCRL    .eq     $0c             ; Output Compare Register (Low Byte)
+ICR     .eq     $0d             ; Input Capture Register
+ICRH    .eq     $0d             ; Input Capture Register (High Byte)
+ICRL    .eq     $0e             ; Intput Capture Register (Low Byte)
+RMCR    .eq     $10             ; Rate and Mode Control Register
+TRCSR   .eq     $11             ; Transmit/Receive Control and Status Register
+RDR     .eq     $12             ; Receive Data Register
+TDR     .eq     $13             ; Transmit Data Register
+RAMCR   .eq     $14             ; RAM Control Register
+
+; *
+; * Timer Control and Status Register
+; *
+OLVL    .eq     $01             ; bit 0 :Output Level
+IEDG    .eq     $02             ; bit 1 :Input Edge
+ETOI    .eq     $04             ; bit 2 :Enable Timer Overflow Interrupt
+EOCI    .eq     $08             ; bit 3 :Enable Output Compare Interrupt
+EICI    .eq     $10             ; bit 4 :Enable Input Capture Interrupt
+TOF     .eq     $20             ; bit 5 :Timer Overflow Flag
+OCF     .eq     $40             ; bit 6 :Output Compare Flag
+ICF     .eq     $80             ; bit 7 :Input Capture Flag
+
+; *
+; * Rate and Mode Control Register
+; *
+; Speed select
+E16     .eq     $00             ; E/16
+E128    .eq     $01             ; E/128
+E1024   .eq     $02             ; E/1024
+E4096   .eq     $03             ; E/4096
+; Clock Control/Format Select
+NRZIN   .eq     $04             ; Format:NRZ Sorce:Internal Port2:Not use
+NRZIO   .eq     $08             ; Format:NRZ Sorce:Internal Port2:Output
+NRZEI   .eq     $0c             ; Format:NRZ Sorce:External Port2:Input
+
+; *
+; * Transmit/Receive Control and Status Register
+; *
+WU      .eq     $01             ; bit 0 :Wake Up
+TE      .eq     $02             ; bit 1 :Transmit Enable
+TIE     .eq     $04             ; bit 2 :Transmit Interrupt Enable
+RE      .eq     $08             ; bit 3 :Recevie Enable
+RIE     .eq     $10             ; bit 4 :Recevie Interrupt Enable
+TDRE    .eq     $20             ; bit 5 :Transmit Data Register Empty
+ORFE    .eq     $40             ; bit 6 :Over Run Framing Error
+RDRF    .eq     $80             ; bit 7 :Receive Data Register Full
+
+; *
+; * RAM Control Register
+; *
+RAME    .eq     $40             ; bit 6 :RAM Enable
+STBYPWR .eq     $80             ; bit 7 :Standby Bit
