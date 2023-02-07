@@ -53,6 +53,7 @@ STACK           .eq     $0fff
 PROGRAM_START   .eq     $1000
 Rx_BUFFER       .eq     $0100   ; SCI Rx Buffer ($0100-0148,73byte)
 Rx_BUFFER_END   .eq     $0148   ; 73byte（72character）
+CSTACK          .eq     $0149   ; 計算スタック (Calculate stack, 40byte)
 
 ; ***********************************************************************
 ;   システム変数 System variables
@@ -81,6 +82,7 @@ R1              .bs     2
         .or     $80
 
 StackPointer    .bs     2       ; スタックポインタ初期値の退避用
+CStackPtr       .bs     2       ; 計算スタック（Calculate stack）ポインタ
 SignFlag        .bs     1       ; 符号フラグ '+' = 0, '-' = 1
 
 ; General-Purpose Registers
@@ -106,19 +108,136 @@ tb_main:
         jsr     write_char
         jsr     read_line
         ldx     #Rx_BUFFER
-        jsr     skip_space
-        jsr     get_int_from_decimal
-        bcs     :1
-        bra     :err
-.1      jsr     write_integer
+        jsr     eval_expression
+        pshx
+        jsr     write_integer
         jsr     write_crlf
-        bra     tb_main
-
-.err    ldx     #MSG
+        pulx                    ; デバッグ用：式評価より後の文字列を表示
+        ldab    0,x
+        beq     :end
         jsr     write_line
-        bra     tb_main
+        jsr     write_crlf
+.end    bra     tb_main
 
-MSG     .az     "It isn't a decimal number.",#CR,#LF
+
+; -----------------------------------------------------------------------
+; 式を評価する
+; Evaluate the expression
+;【引数】B:アスキーコード X:実行位置アドレス
+;【使用】A, B, X （下位ルーチンでUR0, UR1）
+;【返値】真(C=1) / D:Integer X:次の実行位置アドレス
+;        偽(C=0) / X:現在の実行位置アドレス
+; -----------------------------------------------------------------------
+eval_expression:
+      ; // 計算スタックの初期化
+        ldd     #CSTACK+40+1    ; 40byte分
+        std     <CStackPtr
+      ; // 式評価開始
+        bsr     expr_3rd
+      ; // 計算結果をスタックトップから取り出す
+        pshx
+        ldx     <CStackPtr
+        ldd     0,x
+        pulx
+        sec                     ; true:C=1
+        rts
+
+expr_3rd:
+        bsr     expr_2nd
+.loop   jsr     skip_space
+        cmpb    #'+'
+        bne     :minus
+        inx
+        bsr     expr_2nd
+        jsr     CS_add
+        bra     :loop
+.minus  cmpb    #'-'
+        bne     :end
+        inx
+        bsr     expr_2nd
+        jsr     CS_sub
+        bra     :loop
+.end    rts
+
+expr_2nd:
+        bsr     expr_1st
+.loop   jsr     skip_space
+        cmpb    #'*'
+        bne     :div
+        inx
+        bsr     expr_1st
+        jsr     CS_mul
+        bra     :loop
+.div    cmpb    #'/'
+        bne     :mod
+        inx
+        bsr     expr_1st
+        jsr     CS_div
+        bra     :loop
+.mod    cmpb    #'%'
+        bne     :end
+        inx
+        bsr     expr_1st
+        jsr     CS_mod
+        bra     :loop
+.end    rts
+
+expr_1st:
+        jsr     skip_space
+        jsr     get_int_from_decimal    ; 数字チェックと取得
+        bcc     :paren          ; 数字でなければカッコのチェックへ
+        bra     :push           ; 数字であればスタックにプッシュ
+.paren  cmpb    #'('
+        bne     :err04
+        inx
+        bsr     expr_3rd
+        cmpb    #')'
+        bne     :err04
+        inx
+        rts
+.push   pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        dex
+        dex
+        cpx     #CSTACK-2       ; スタックオーバーフローのチェック
+        bcs     :err06
+        std     0,x
+        stx     <CStackPtr
+        pulx                    ; 実行位置アドレスを復帰
+        rts
+.err04  ldaa    #4              ; "Illegal expression"
+        jmp     write_err_msg
+.err06  ldaa    #6              ; "Calculate stack overflow"
+        jmp     write_err_msg
+
+;
+; Arithmetic operator
+;
+CS_store:
+        inx
+        inx
+        std     0,x
+        stx     <CStackPtr      ; 計算スタックポインタを保存
+        pulx                    ; 実行位置アドレスを復帰
+        rts
+
+CS_add: pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ldd     2,x
+        addd    0,x
+        bra     CS_store
+
+CS_sub: pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ldd     2,x
+        subd    0,x
+        bra     CS_store
+
+; TODO: 後で実装
+CS_mul:
+CS_div:
+CS_mod:
+        rts
 
 
 ; -----------------------------------------------------------------------
@@ -242,6 +361,7 @@ write_integer:
         .dw     $0064           ; 100
         .dw     $000a           ; 10
 
+
 ; -----------------------------------------------------------------------
 ; 空白を読み飛ばす
 ; Skip Space
@@ -268,7 +388,7 @@ skip_space:
 ;【返値】なし
 ; -----------------------------------------------------------------------
 write_err_msg:
-ldx     #ERRMSG
+        ldx     #ERRMSG
         jsr     write_line
         tab
         ldx     #ERRCODE
@@ -281,12 +401,14 @@ ldx     #ERRMSG
         jmp     tb_main
 
 ERRMSG  .az     "ERROR: "
-ERRCODE .dw     .0
-        .dw     .2
-        .dw     .4
-.0      .az     "Syntax error"
-.2      .az     "Out of range value"
-.4      .az     "Illegal expression"
+ERRCODE .dw     .err00
+        .dw     .err02
+        .dw     .err04
+        .dw     .err06
+.err00  .az     "Syntax error"
+.err02  .az     "Out of range value"
+.err04  .az     "Illegal expression"
+.err06  .az     "Calculate stack overflow"
 
 
 ; ***********************************************************************
