@@ -84,6 +84,10 @@ R1              .bs     2
 StackPointer    .bs     2       ; スタックポインタ初期値の退避用
 CStackPtr       .bs     2       ; 計算スタック（Calculate stack）ポインタ
 SignFlag        .bs     1       ; 符号フラグ '+' = 0, '-' = 1
+QuoSignFlag     .bs     1       ; 商（Quotient）の符号フラグ '+' = 0, '-' = 1
+RemSignFlag     .bs     1       ; 剰余（Remainder）の符号フラグ '+' = 0, '-' = 1
+Divisor         .bs     2       ; 除数
+Remainder       .bs     2       ; 剰余
 
 ; General-Purpose Registers
 UR0             *
@@ -256,10 +260,101 @@ CS_mul:
         ldab    <:Result+1      ; Resultの下位8bitをBレジスタに転送
         bra     CS_store
 
-; TODO: 後で実装
-CS_div:
-CS_mod:
+;
+; 符号付き割り算の考え方
+; ・剰余は除数の符号と同一
+;   ・ 7 / 3  = 商  2、剰余  1
+;   ・-7 / 3  = 商 -3、剰余  2
+;   ・ 7 / -3 = 商 -3、剰余 -2
+;   ・-7 / -3 = 商  2、剰余 -1
+;  商 ：1.被除数の符号と序数の符号が一致していないときには1足して符号反転する
+;       2.ただし、除数がゼロの場合は1は足さない
+; 剰余：1.被除数の符号と序数の符号が一致していないときには
+;         除数の絶対値から剰余の絶対値を引く
+;       2.その結果を除数と同じ符号にする
+;       3.ただし、除数がゼロの場合は剰余もゼロ
+;
+CS_div: pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        bsr     div_uint        ; 除算実行
+        xgdx                    ; D <- 商（Quotient） X <- 剰余（Remainder）
+        tst     <QuoSignFlag    ; 商の符号チェック
+        beq     :end            ; '+'なら終了
+        cpx     #0              ; 剰余はゼロか？
+        beq     :sign
+        addd    #1              ; ゼロでなければ商に1を足す
+.sign   coma                    ; Dレジスタの値を2の補数にする
+        comb
+        addd    #1
+.end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        bra     CS_store
+
+CS_mod: pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        bsr     div_uint        ; 除算実行。D = 剰余
+        std     <Remainder      ; 剰余はゼロか？
+        beq     :end            ; ゼロであれば終了
+        tst     <QuoSignFlag    ; 被除数・除数の符号一致チェック
+        beq     :sign           ; 0なら一致しているので剰余の符号チェック
+        ldd     <Divisor        ; 1なら一致していないので除数 - 剰余
+        subd    <Remainder
+.sign   tst     <RemSignFlag    ; 剰余の符号チェック
+        beq     :end            ; '+'なら終了
+        coma                    ; '-'なら2の補数にする
+        comb
+        addd    #1
+.end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        bra     CS_store
+
+div_uint: 
+.Counter        .eq     UR0H
+        ldd     0,x             ; ゼロ除算チェック
+        beq     :err08          ; 除数がゼロならエラー
+        clrb
+        stab    <QuoSignFlag    ; 商の符号フラグを初期化
+        stab    <RemSignFlag    ; 剰余の符号フラグを初期化
+        ldab    #16             ; ループカウンターをセット（16bit分）
+        stab    <:Counter
+        ; // 剰余の符号フラグの設定
+        ldd     0,x             ; Dレジスタに除数を代入
+        bpl     :1              ; 除数が正であれば剰余の符号は正（0）
+        inc     <RemSignFlag    ; 除数が負であれば剰余の符号は負（1）
+        ; // 商の符号フラグの設定
+.1      eora    2,x             ; 被除数の符号と除数の符号のXORを取る
+        bpl     :2              ; 被除数と除数の符号が同じなら商の符号は正（0）
+        inc     <QuoSignFlag    ; 被除数と除数の符号が違えば商の符号は負（1）
+        ; // 除数を絶対値にする
+.2      ldd     0,x             ; D <- 除数
+        bpl     :3
+        coma                    ; 除数が負なら絶対値にする
+        comb
+        addd    #1
+.3      std     <Divisor        ; 除数を保存
+        ; // 非除数を絶対値にする
+        ldd     2,x             ; D <- 被除数
+        bpl     :4
+        coma                    ; 被除数が負なら絶対値にする
+        comb
+        addd    #1
+        ; // 除算実行
+.4      xgdx                    ; X <- 被除数
+        clra                    ; D（WORK）をクリア
+        clrb
+.loop   xgdx                    ; X（被除数）を左シフト
+        asld
+        xgdx
+        rolb                    ; 被除数のMSBをWORKのLSBに代入
+        rola
+        subd    <Divisor        ; WORK - 除数
+        inx                     ; XレジスタのLSBを1にセットしておく
+        bcc     :5              ; WORKから除数を引けた？
+        addd    <Divisor        ; 引けなければ除数を足して...
+        dex                     ; XレジスタのLSBを0に戻す
+.5      dec     <:Counter       ; ループカウンターを1引く
+        bne     :loop
         rts
+.err08  ldaa    #8              ; "Zero Divide"
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
@@ -427,10 +522,12 @@ ERRCODE .dw     .err00
         .dw     .err02
         .dw     .err04
         .dw     .err06
+        .dw     .err08
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
 .err06  .az     "Calculate stack overflow"
+.err08  .az     "Zero Divide"
 
 
 ; ***********************************************************************
