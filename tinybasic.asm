@@ -233,8 +233,30 @@ CS_sub: pshx                    ; 実行位置アドレスを退避
         subd    0,x
         bra     CS_store
 
-; TODO: 後で実装
 CS_mul:
+.Result         .eq     UR0
+        pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ; B * D
+        ldaa    3,x             ;「B」をAレジスタに代入
+        ldab    1,x             ;「D」をBレジスタに代入
+        mul                     ; B * D
+        std     <:Result        ;「B*D」を保存
+        ; A * D
+        ldd     1,x             ;「D」をAレジスタに、「A」をBレジスタに同時に代入
+        mul                     ; A * D
+        addb    <:Result        ;「A*D」の下位8bitをResultの上位8bitに加算
+        stab    <:Result        ; Resultの上位8bitを保存
+        ; C * B
+        ldaa    0,x             ;「C」をAレジスタに代入
+        ldab    3,x             ;「B」をBレジスタに代入
+        mul                     ; C * B
+        addb    <:Result        ;「C*B」の下位8bitをResultの上位8bitに加算
+        tba                     ; Resultの上位8bitをAレジスタに転送
+        ldab    <:Result+1      ; Resultの下位8bitをBレジスタに転送
+        bra     CS_store
+
+; TODO: 後で実装
 CS_div:
 CS_mod:
         rts
