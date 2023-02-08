@@ -54,6 +54,7 @@ PROGRAM_START   .eq     $1000
 Rx_BUFFER       .eq     $0100   ; SCI Rx Buffer ($0100-0148,73byte)
 Rx_BUFFER_END   .eq     $0148   ; 73byte（72character）
 CSTACK          .eq     $0149   ; 計算スタック (Calculate stack, 40byte)
+VARIABLE        .eq     $01c2   ; 変数26文字 ($01c2-01f5, 52byte)
 
 ; ***********************************************************************
 ;   システム変数 System variables
@@ -106,6 +107,22 @@ UR1L            .bs     1
 init_tinybasic:
         tsx
         stx     <StackPointer
+
+; *** テスト用 *****************
+; 変数a,bにあらかじめ数値を代入しておく
+        ldd     #10
+        std     VARIABLE        ; a = 10
+        ldd     #20
+        std     VARIABLE+2      ; b = 20
+;
+; >1+2
+; 3
+; >1+a
+; 11
+; >a+b
+; 30
+;
+; ******************************
 
 tb_main:
         ldab    #'>'
@@ -189,8 +206,18 @@ expr_2nd:
 expr_1st:
         jsr     skip_space
         jsr     get_int_from_decimal    ; 数字チェックと取得
-        bcc     :paren          ; 数字でなければカッコのチェックへ
+        bcc     :var            ; 数字でなければ変数のチェックへ
         bra     :push           ; 数字であればスタックにプッシュ
+.var    jsr     is_variable     ; 変数か？
+        bcc     :paren          ; 変数でなければカッコのチェックへ
+      ; // 変数値の取得
+        pshx                    ; 実行位置アドレスを退避
+        ldaa    #VARIABLE>>8    ; A = 変数領域の上位バイト
+        aslb                    ; B = 変数領域の下位バイト
+        xgdx                    ; X = 変数のアドレス
+        ldd     0,x             ; D <- 変数の値
+        pulx                    ; 実行位置アドレスを復帰
+        bra     :push           ; 変数の値をスタックにプッシュ
 .paren  cmpb    #'('
         bne     :err04
         inx
@@ -477,6 +504,30 @@ write_integer:
         .dw     $03e8           ; 1,000
         .dw     $0064           ; 100
         .dw     $000a           ; 10
+
+
+; -----------------------------------------------------------------------
+; テキストバッファの英文字が変数か判定する
+; Is a character retrieved from a text buffer a variable?
+;【引数】X:バッファアドレス
+;【使用】A, B, X
+;【返値】真(C=1) / B:変数のアスキーコード X:次のバッファアドレス
+;        偽(C=0) / B:現在の位置のアスキーコード X:現在のバッファアドレス
+; -----------------------------------------------------------------------
+is_variable:
+        ldab    0,x
+        jsr     is_alphabetic_char
+        bcc     :end
+        tba                             ; 1文字目のアスキーコードを退避
+        ldab    1,x                     ; 2文字目を取得
+        jsr     is_alphabetic_char      ; 2文字もアルファベットか？
+        tab                             ; 1文字目のアスキーコードを復帰
+        bcc     :var                    ; No. 英文字1字なので変数である
+        clc                             ; Yes. 変数ではない。C=0
+        rts
+.var    inx                             ; ポインタを進める
+        sec                             ; C=1
+.end    rts
 
 
 ; -----------------------------------------------------------------------
