@@ -89,6 +89,8 @@ QuoSignFlag     .bs     1       ; 商（Quotient）の符号フラグ '+' = 0, '
 RemSignFlag     .bs     1       ; 剰余（Remainder）の符号フラグ '+' = 0, '-' = 1
 Divisor         .bs     2       ; 除数
 Remainder       .bs     2       ; 剰余
+VariableAddr    .bs     2       ; 変数のアドレス
+ExePointer      .bs     2       ; 実行位置（Execute address）ポインタ
 
 ; General-Purpose Registers
 UR0             *
@@ -108,29 +110,30 @@ init_tinybasic:
         tsx
         stx     <StackPointer
 
-; *** テスト用 *****************
-; 変数a,bにあらかじめ数値を代入しておく
-        ldd     #10
-        std     VARIABLE        ; a = 10
-        ldd     #20
-        std     VARIABLE+2      ; b = 20
-;
-; >1+2
-; 3
-; >1+a
-; 11
-; >a+b
-; 30
-;
-; ******************************
-
 tb_main:
         ldab    #'>'
         jsr     write_char
         jsr     read_line
         ldx     #Rx_BUFFER
-        jsr     eval_expression
-        pshx
+        jsr     skip_space
+        beq     :end            ; 終端文字（$00）ならば終了
+      ; // 代入文のチェック
+        jsr     is_variable     ; 変数か？
+        bcc     :expr           ; No. 式評価へ
+        ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
+        aslb                    ; B = 変数領域の下位バイト
+        std     <VariableAddr   ; 変数アドレスを保存
+        stx     <ExePointer     ; 代入文ではなかった時に備えて実行位置ポインタを退避
+        jsr     skip_space
+        cmpb    #'='            ; 代入文か？
+        bne     :notlet         ; No. 式評価へ
+        inx                     ; Yes. 代入実行
+        jsr     exe_let
+        bra     :finish
+.notlet ldx     <ExePointer     ; is_variablesで進んだ実行位置ポインタを
+        dex                     ; 戻してから式評価へ
+.expr   jsr     eval_expression
+.finish pshx
         jsr     write_integer
         jsr     write_crlf
         pulx                    ; デバッグ用：式評価より後の文字列を表示
@@ -546,6 +549,26 @@ skip_space:
         inx
         bra     skip_space
 .end    rts
+
+
+; -----------------------------------------------------------------------
+; 式を評価して変数に値を代入する
+; Evaluate an expression and assign a value to a variable
+;【引数】X:実行位置アドレス *VarAddress:変数のアドレス
+;【使用】A, B, X（関連ルーチンでUR0, UR1）
+;【返値】D:Integer X:次の実行位置アドレス
+; -----------------------------------------------------------------------
+exe_let:
+        jsr     skip_space
+        jsr     eval_expression
+        bcc     :err04
+        pshx                    ; 実行位置アドレスを退避
+        ldx     <VariableAddr
+        std     0,x             ; 変数に結果を保存
+        pulx                    ; 実行位置アドレスを復帰
+        rts
+.err04  ldaa    #4              ; "Illegal expression"
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
