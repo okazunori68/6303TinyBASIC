@@ -54,6 +54,7 @@ PROGRAM_START   .eq     $1000
 Rx_BUFFER       .eq     $0100   ; SCI Rx Buffer ($0100-0148,73byte)
 Rx_BUFFER_END   .eq     $0148   ; 73byte（72character）
 CSTACK          .eq     $0149   ; 計算スタック (Calculate stack, 40byte)
+VARIABLE        .eq     $01c2   ; 変数26文字 ($01c2-01f5, 52byte)
 
 ; ***********************************************************************
 ;   システム変数 System variables
@@ -88,6 +89,8 @@ QuoSignFlag     .bs     1       ; 商（Quotient）の符号フラグ '+' = 0, '
 RemSignFlag     .bs     1       ; 剰余（Remainder）の符号フラグ '+' = 0, '-' = 1
 Divisor         .bs     2       ; 除数
 Remainder       .bs     2       ; 剰余
+VariableAddr    .bs     2       ; 変数のアドレス
+ExePointer      .bs     2       ; 実行位置（Execute address）ポインタ
 
 ; General-Purpose Registers
 UR0             *
@@ -112,8 +115,25 @@ tb_main:
         jsr     write_char
         jsr     read_line
         ldx     #Rx_BUFFER
-        jsr     eval_expression
-        pshx
+        jsr     skip_space
+        beq     :end            ; 終端文字（$00）ならば終了
+      ; // 代入文のチェック
+        jsr     is_variable     ; 変数か？
+        bcc     :expr           ; No. 式評価へ
+        ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
+        aslb                    ; B = 変数領域の下位バイト
+        std     <VariableAddr   ; 変数アドレスを保存
+        stx     <ExePointer     ; 代入文ではなかった時に備えて実行位置ポインタを退避
+        jsr     skip_space
+        cmpb    #'='            ; 代入文か？
+        bne     :notlet         ; No. 式評価へ
+        inx                     ; Yes. 代入実行
+        jsr     exe_let
+        bra     :finish
+.notlet ldx     <ExePointer     ; is_variablesで進んだ実行位置ポインタを
+        dex                     ; 戻してから式評価へ
+.expr   jsr     eval_expression
+.finish pshx
         jsr     write_integer
         jsr     write_crlf
         pulx                    ; デバッグ用：式評価より後の文字列を表示
@@ -189,8 +209,18 @@ expr_2nd:
 expr_1st:
         jsr     skip_space
         jsr     get_int_from_decimal    ; 数字チェックと取得
-        bcc     :paren          ; 数字でなければカッコのチェックへ
+        bcc     :var            ; 数字でなければ変数のチェックへ
         bra     :push           ; 数字であればスタックにプッシュ
+.var    jsr     is_variable     ; 変数か？
+        bcc     :paren          ; 変数でなければカッコのチェックへ
+      ; // 変数値の取得
+        pshx                    ; 実行位置アドレスを退避
+        ldaa    #VARIABLE>>8    ; A = 変数領域の上位バイト
+        aslb                    ; B = 変数領域の下位バイト
+        xgdx                    ; X = 変数のアドレス
+        ldd     0,x             ; D <- 変数の値
+        pulx                    ; 実行位置アドレスを復帰
+        bra     :push           ; 変数の値をスタックにプッシュ
 .paren  cmpb    #'('
         bne     :err04
         inx
@@ -480,6 +510,30 @@ write_integer:
 
 
 ; -----------------------------------------------------------------------
+; テキストバッファの英文字が変数か判定する
+; Is a character retrieved from a text buffer a variable?
+;【引数】X:バッファアドレス
+;【使用】A, B, X
+;【返値】真(C=1) / B:変数のアスキーコード X:次のバッファアドレス
+;        偽(C=0) / B:現在の位置のアスキーコード X:現在のバッファアドレス
+; -----------------------------------------------------------------------
+is_variable:
+        ldab    0,x
+        jsr     is_alphabetic_char
+        bcc     :end
+        tba                             ; 1文字目のアスキーコードを退避
+        ldab    1,x                     ; 2文字目を取得
+        jsr     is_alphabetic_char      ; 2文字もアルファベットか？
+        tab                             ; 1文字目のアスキーコードを復帰
+        bcc     :var                    ; No. 英文字1字なので変数である
+        clc                             ; Yes. 変数ではない。C=0
+        rts
+.var    inx                             ; ポインタを進める
+        sec                             ; C=1
+.end    rts
+
+
+; -----------------------------------------------------------------------
 ; 空白を読み飛ばす
 ; Skip Space
 ;【引数】X:実行位置アドレス
@@ -495,6 +549,26 @@ skip_space:
         inx
         bra     skip_space
 .end    rts
+
+
+; -----------------------------------------------------------------------
+; 式を評価して変数に値を代入する
+; Evaluate an expression and assign a value to a variable
+;【引数】X:実行位置アドレス *VarAddress:変数のアドレス
+;【使用】A, B, X（関連ルーチンでUR0, UR1）
+;【返値】D:Integer X:次の実行位置アドレス
+; -----------------------------------------------------------------------
+exe_let:
+        jsr     skip_space
+        jsr     eval_expression
+        bcc     :err04
+        pshx                    ; 実行位置アドレスを退避
+        ldx     <VariableAddr
+        std     0,x             ; 変数に結果を保存
+        pulx                    ; 実行位置アドレスを復帰
+        rts
+.err04  ldaa    #4              ; "Illegal expression"
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
