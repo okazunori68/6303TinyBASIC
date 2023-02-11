@@ -585,16 +585,58 @@ exe_let:
 
 
 ; -----------------------------------------------------------------------
-; print文を実行する
+; 引用符付きの文字列を出力する
+; Write Quoted Stirng
+;【引数】B:アスキーコード X:実行位置アドレス
+;【使用】A, B, X
+;【返値】真(C=1) / X:次の実行位置アドレス
+;        偽：引用符がない(C=0) / X:現在の実行位置アドレス
+; -----------------------------------------------------------------------
+write_quoted_str:
+        cmpb    #$22            ; 一重引用符か？
+        beq     :1
+        cmpb    #$27            ; 二重引用符か？
+        bne     :false          ; 引用符がなければC=0にしてリターン
+.1      tba                     ; Aレジスタに引用符の種類を保存しておく
+      ; // 終端の引用符をチェック
+        pshx
+.check  inx
+        ldab    0,x
+        beq     :err10          ; 終端文字なら"Print Statement Error"
+        cba
+        bne     :check
+        pulx
+      ; // 文字列の出力
+.loop   inx
+        ldab    0,x
+        cba                     ; 保存した引用符との比較
+        beq     :true           ; 文字列前後の引用符が一致すれば終了処理
+        jsr     write_char
+        bra     :loop
+.true   inx
+        sec
+        rts
+.false  clc
+        rts
+.err10  ldaa    #10             ; "Print statement error"
+        jmp     write_err_msg
+
+
+; -----------------------------------------------------------------------
+; Print文を実行する
 ; Execute 'print' statement
+;【引数】X:実行位置アドレス
+;【使用】B, X（下位ルーチンでA）
+;【返値】なし
 ; -----------------------------------------------------------------------
 exe_print:
-        pshx
-        ldx     #:MSG
-        jsr     write_line
-        pulx
+        jsr     skip_space
+        jsr     write_quoted_str ; 引用符があれば文字列を出力する
+        bcc     :err00
+        jsr     write_crlf
         jmp     tb_main
-.MSG    .az     "Execute 'print' statement",#CR,#LF
+.err00  clra                    ; "Syntax error"
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
@@ -721,11 +763,13 @@ ERRCODE .dw     .err00
         .dw     .err04
         .dw     .err06
         .dw     .err08
+        .dw     .err10
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
 .err06  .az     "Calculate stack overflow"
 .err08  .az     "Zero Divide"
+.err10  .az     "Print statement error"
 
 
 ; ***********************************************************************
