@@ -632,11 +632,13 @@ write_quoted_str:
 exe_print:
         jsr     skip_space
         jsr     write_quoted_str ; 引用符があれば文字列を出力する
-        bcc     :err00
-        jsr     write_crlf
+        bcs     :end
+        jsr     eval_expression
+        pshx                    ; 実行位置アドレスを退避
+        jsr     write_integer   ; 評価した式を出力
+        pulx                    ; 実行位置アドレスを復帰
+.end    jsr     write_crlf
         jmp     tb_main
-.err00  clra                    ; "Syntax error"
-        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
