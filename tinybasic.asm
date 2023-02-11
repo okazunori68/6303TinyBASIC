@@ -99,6 +99,8 @@ UR0L            .bs     1
 UR1             *
 UR1H            .bs     1
 UR1L            .bs     1
+; Work area
+COMPARE         .bs     6       ; 文字列比較用バッファ
 
 ; ***********************************************************************
 ;   Program Start
@@ -114,34 +116,45 @@ tb_main:
         ldab    #'>'
         jsr     write_char
         jsr     read_line
-        ldx     #Rx_BUFFER
+        ldx     #Rx_BUFFER      ; 実行位置アドレスをセット
+        jmp     exe_line
+
+
+; -----------------------------------------------------------------------
+; 一行実行
+; Execute one line
+;【引数】X:実行位置アドレス
+;【使用】A, B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_line:
         jsr     skip_space
         beq     :end            ; 終端文字（$00）ならば終了
       ; // 代入文のチェック
         jsr     is_variable     ; 変数か？
-        bcc     :expr           ; No. 式評価へ
+        bcc     :cmd            ; No. テーブル検索へ
         ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
         aslb                    ; B = 変数領域の下位バイト
         std     <VariableAddr   ; 変数アドレスを保存
-        stx     <ExePointer     ; 代入文ではなかった時に備えて実行位置ポインタを退避
-        jsr     skip_space
-        cmpb    #'='            ; 代入文か？
-        bne     :notlet         ; No. 式評価へ
+        jsr     skip_space      ; Yes. 代入文か？
+        cmpb    #'='
+        bne     :err00          ; No. エラー処理へ
         inx                     ; Yes. 代入実行
-        jsr     exe_let
-        bra     :finish
-.notlet ldx     <ExePointer     ; is_variablesで進んだ実行位置ポインタを
-        dex                     ; 戻してから式評価へ
-.expr   jsr     eval_expression
-.finish pshx
-        jsr     write_integer
-        jsr     write_crlf
-        pulx                    ; デバッグ用：式評価より後の文字列を表示
-        ldab    0,x
-        beq     :end
-        jsr     write_line
-        jsr     write_crlf
-.end    bra     tb_main
+        jmp     exe_let
+.cmd    ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
+        std     <COMPARE
+        ldd     2,x
+        std     <COMPARE+2
+        ldd     4,x
+        std     <COMPARE+4
+        stx     <ExePointer     ; 実行位置アドレスを退避
+        ldx     #SMT_TABLE      ; 文字列テーブルアドレスをセット
+        jsr     search_table    ; テーブル検索実行
+        bcc     :err00
+.end    jmp     tb_main
+
+.err00  clra                    ; syntax error.
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
@@ -566,9 +579,120 @@ exe_let:
         ldx     <VariableAddr
         std     0,x             ; 変数に結果を保存
         pulx                    ; 実行位置アドレスを復帰
-        rts
+        jmp     tb_main
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
+
+
+; -----------------------------------------------------------------------
+; print文を実行する
+; Execute 'print' statement
+; -----------------------------------------------------------------------
+exe_print:
+        pshx
+        ldx     #:MSG
+        jsr     write_line
+        pulx
+        jmp     tb_main
+.MSG    .az     "Execute 'print' statement",#CR,#LF
+
+
+; -----------------------------------------------------------------------
+; input文を実行する
+; Execute 'input' statement
+; -----------------------------------------------------------------------
+exe_input:
+        pshx
+        ldx     #:MSG
+        jsr     write_line
+        pulx
+        jmp     tb_main
+.MSG    .az     "Execute 'input' statement",#CR,#LF
+
+
+; -----------------------------------------------------------------------
+; if文を実行する
+; Execute 'if' statement
+; -----------------------------------------------------------------------
+exe_if:
+        pshx
+        ldx     #:MSG
+        jsr     write_line
+        pulx
+        jmp     tb_main
+.MSG    .az     "Execute 'if' statement",#CR,#LF
+
+
+; -----------------------------------------------------------------------
+; テーブル検索
+; Search the keyword table
+;【引数】X:テーブルの先頭アドレス, *ExePointer:実行位置アドレス
+;【使用】A, B, X
+;【結果】真(C=1) / 命令文実行. X:次の実行位置アドレス
+;        偽(C=0) / 何もせずにリターン X:引数*ExePointer（実行位置アドレス）
+; -----------------------------------------------------------------------
+search_table:
+.top    ldd     5,x             ; キーワードの初めの2文字をDレジスタに
+        cmpa    <COMPARE        ; 1文字目を比較
+        bne     :false
+        cmpb    <COMPARE+1      ; 2文字目を比較
+        bne     :false
+        ldd     7,x             ; 次の2文字をDレジスタに
+        tsta                    ; $00（終端記号）か？
+        beq     :true
+        cmpa    <COMPARE+2      ; 3文字目を比較
+        bne     :false
+        tstb                    ; $00（終端記号）か？
+        beq     :true
+        cmpb    <COMPARE+3      ; 4文字目を比較
+        bne     :false
+        ldd     9,x             ; 次の2文字をDレジスタに
+        tsta                    ; $00（終端記号）か？
+        beq     :true
+        cmpa    <COMPARE+4      ; 5文字目を比較
+        bne     :false
+        tstb                    ; $00（終端記号）か？
+        beq     :true
+        cmpb    <COMPARE+5      ; 6文字目を比較
+        bne     :false
+.true   ldab    2,x             ; B = 語長
+        ldx     3,x             ; X = 命令ルーチンのアドレス
+        ins                     ; 元のリターンアドレスを削除
+        ins
+        pshx                    ; スタックトップにリターンアドレスを積む
+        ldx     <ExePointer
+        abx                     ; 実行位置アドレスを文字数分プラスする
+        rts                     ; 命令ルーチンにジャンプ
+.false  ldx     0,x             ; リンクポインタを読み込み、次のキーワードに
+        bne     :top
+        ldx     <ExePointer     ; マッチしなければ実行位置ポインタを元に戻す
+        clc                     ; false: C=0
+        rts
+
+
+; ***********************************************************************
+;   キーワードテーブル Keyword table
+; ***********************************************************************
+; レコードの構造 Record structure
+; +--------+--------+--------+--------+--------+------+-~-+------+--------+
+; | リンクポインタ  |  語長  |命令ルーチン位置 |   キーワード    |  終端  |
+; |   Link pointer  | Length |Execution address|     Keyword     |  $00   |
+; +--------+--------+--------+--------+--------+------+-~-+------+--------+
+; キーワードは2文字以上6文字以下
+SMT_TABLE:      .eq     *
+.print          .dw     :input
+                .db     5
+                .dw     exe_print
+                .az     "print"
+.input          .dw     :if
+                .db     5
+                .dw     exe_input
+                .az     "input"
+.if             .dw     :bottom
+                .db     2
+                .dw     exe_if
+                .az     "if"
+.bottom         .dw     $0000           ; リンクポインタ$0000はテーブルの終端
 
 
 ; -----------------------------------------------------------------------
