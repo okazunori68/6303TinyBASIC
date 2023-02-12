@@ -129,6 +129,25 @@ tb_main:
 
 
 ; -----------------------------------------------------------------------
+; マルチステートメントかどうか判定（is_multiはexe_lineの補助ルーチン）
+; Is a multi statement mark?
+;【引数】X:実行位置アドレス
+;【使用】B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+is_multi:
+        jsr     skip_space
+        beq     :end
+        cmpb    #':'
+        bne     :err00
+        inx
+        bra     exe_line
+.end    jmp     tb_main
+.err00  clra                    ; "Syntax error"
+        jmp     write_err_msg
+
+
+; -----------------------------------------------------------------------
 ; 一行実行
 ; Execute one line
 ;【引数】X:実行位置アドレス
@@ -652,7 +671,7 @@ exe_let:
         ldx     <VariableAddr
         std     0,x             ; 変数に結果を保存
         pulx                    ; 実行位置アドレスを復帰
-        jmp     exe_line
+        jmp     is_multi
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
 
@@ -673,11 +692,13 @@ exe_print:
         jsr     eval_expression
         bcs     :int
       ; // eval_expressionの返値がC=0だった場合は式が存在したのか確認する
-      ; // 'print'の次の文字がセミコロンとカンマであれば式は無かったとする
+      ; // 'print'の次の文字がセミコロンとカンマ、コロンであれば式は無かったとする
 .check  cmpb    #';'
         beq     :nloff
         cmpb    #','
         beq     :tab
+        cmpb    #':'
+        beq     :finish
         ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
 .int    pshx                    ; 実行位置アドレスを退避
@@ -696,7 +717,7 @@ exe_print:
 .finish tst     <NewLineFlag
         beq     :end            ; 改行フラグが'OFF'なら終了
         jsr     write_crlf      ; 改行フラグが'ON'なら改行出力
-.end    jmp     exe_line
+.end    jmp     is_multi
 
 
 ; -----------------------------------------------------------------------
@@ -708,7 +729,7 @@ exe_input:
         ldx     #:MSG
         jsr     write_line
         pulx
-        jmp     exe_line
+        jmp     is_multi
 .MSG    .az     "Execute 'input' statement",#CR,#LF
 
 
@@ -721,7 +742,7 @@ exe_if:
         ldx     #:MSG
         jsr     write_line
         pulx
-        jmp     exe_line
+        jmp     is_multi
 .MSG    .az     "Execute 'if' statement",#CR,#LF
 
 
