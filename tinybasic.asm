@@ -72,6 +72,7 @@ VEC_IRQ         .bs     3
 VEC_SWI         .bs     3
 VEC_NMI         .bs     3
 BreakPointFlag  .bs     1
+TabCount        .bs     1       ; タブ用の文字数カウンタ
 ; General-Purpose Registers
 R0              .bs     2
 R1              .bs     2
@@ -91,6 +92,7 @@ Divisor         .bs     2       ; 除数
 Remainder       .bs     2       ; 剰余
 VariableAddr    .bs     2       ; 変数のアドレス
 ExePointer      .bs     2       ; 実行位置（Execute address）ポインタ
+NewLineFlag     .bs     1       ; 改行フラグ（print文） 0 = OFF, 1以上 = ON
 
 ; General-Purpose Registers
 UR0             *
@@ -99,6 +101,14 @@ UR0L            .bs     1
 UR1             *
 UR1H            .bs     1
 UR1L            .bs     1
+UR2             *
+UR2H            .bs     1
+UR2L            .bs     1
+UR3             *
+UR3H            .bs     1
+UR3L            .bs     1
+; Work area
+COMPARE         .bs     6       ; 文字列比較用バッファ
 
 ; ***********************************************************************
 ;   Program Start
@@ -114,45 +124,63 @@ tb_main:
         ldab    #'>'
         jsr     write_char
         jsr     read_line
-        ldx     #Rx_BUFFER
+        ldx     #Rx_BUFFER      ; 実行位置アドレスをセット
+        jmp     exe_line
+
+
+; -----------------------------------------------------------------------
+; 一行実行
+; Execute one line
+;【引数】X:実行位置アドレス
+;【使用】A, B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_line:
         jsr     skip_space
         beq     :end            ; 終端文字（$00）ならば終了
       ; // 代入文のチェック
         jsr     is_variable     ; 変数か？
-        bcc     :expr           ; No. 式評価へ
+        bcc     :cmd            ; No. テーブル検索へ
         ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
         aslb                    ; B = 変数領域の下位バイト
         std     <VariableAddr   ; 変数アドレスを保存
-        stx     <ExePointer     ; 代入文ではなかった時に備えて実行位置ポインタを退避
-        jsr     skip_space
-        cmpb    #'='            ; 代入文か？
-        bne     :notlet         ; No. 式評価へ
+        jsr     skip_space      ; Yes. 代入文か？
+        cmpb    #'='
+        bne     :err00          ; No. エラー処理へ
         inx                     ; Yes. 代入実行
-        jsr     exe_let
-        bra     :finish
-.notlet ldx     <ExePointer     ; is_variablesで進んだ実行位置ポインタを
-        dex                     ; 戻してから式評価へ
-.expr   jsr     eval_expression
-.finish pshx
-        jsr     write_integer
-        jsr     write_crlf
-        pulx                    ; デバッグ用：式評価より後の文字列を表示
-        ldab    0,x
-        beq     :end
-        jsr     write_line
-        jsr     write_crlf
-.end    bra     tb_main
+        jmp     exe_let
+.cmd    ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
+        std     <COMPARE
+        ldd     2,x
+        std     <COMPARE+2
+        ldd     4,x
+        std     <COMPARE+4
+        stx     <ExePointer     ; 実行位置アドレスを退避
+        ldx     #SMT_TABLE      ; 文字列テーブルアドレスをセット
+        jsr     search_table    ; テーブル検索実行
+        bcc     :err00
+.end    jmp     tb_main
+
+.err00  clra                    ; syntax error.
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
 ; 式を評価する
 ; Evaluate the expression
 ;【引数】B:アスキーコード X:実行位置アドレス
-;【使用】A, B, X （下位ルーチンでUR0, UR1）
+;【使用】A, B, X, UR2, UR3 （下位ルーチンでUR0, UR1）
 ;【返値】真(C=1) / D:Integer X:次の実行位置アドレス
 ;        偽(C=0) / X:現在の実行位置アドレス
 ; -----------------------------------------------------------------------
 eval_expression:
+.SP     .eq     UR2
+.X      .eq     UR3
+      ; // エラー時SPとXを元に戻すために初期値をUR2とUR3に退避しておく
+        stx     <:X
+        tsx
+        stx     <:SP
+        ldx     <:X
       ; // 計算スタックの初期化
         ldd     #CSTACK+40+1    ; 40byte分
         std     <CStackPtr
@@ -207,6 +235,8 @@ expr_2nd:
 .end    rts
 
 expr_1st:
+.SP     .eq     UR2
+.X      .eq     UR3
         jsr     skip_space
         jsr     get_int_from_decimal    ; 数字チェックと取得
         bcc     :var            ; 数字でなければ変数のチェックへ
@@ -222,11 +252,11 @@ expr_1st:
         pulx                    ; 実行位置アドレスを復帰
         bra     :push           ; 変数の値をスタックにプッシュ
 .paren  cmpb    #'('
-        bne     :err04
+        bne     :err
         inx
         bsr     expr_3rd
         cmpb    #')'
-        bne     :err04
+        bne     :err
         inx
         rts
 .push   pshx                    ; 実行位置アドレスを退避
@@ -239,8 +269,12 @@ expr_1st:
         stx     <CStackPtr
         pulx                    ; 実行位置アドレスを復帰
         rts
-.err04  ldaa    #4              ; "Illegal expression"
-        jmp     write_err_msg
+      ; // 戻り先をeval_expressionの呼び出し元に戻してリターン
+.err    ldx     <:SP
+        txs
+        ldx     <:X
+        clc                     ; false:C=0
+        rts
 .err06  ldaa    #6              ; "Calculate stack overflow"
         jmp     write_err_msg
 
@@ -552,10 +586,62 @@ skip_space:
 
 
 ; -----------------------------------------------------------------------
+; 引用符付きの文字列を出力する
+; Write Quoted Stirng
+;【引数】B:アスキーコード X:実行位置アドレス
+;【使用】A, B, X
+;【返値】真(C=1) / X:次の実行位置アドレス
+;        偽：引用符がない(C=0) / X:現在の実行位置アドレス
+; -----------------------------------------------------------------------
+write_quoted_str:
+        cmpb    #$22            ; 一重引用符か？
+        beq     :1
+        cmpb    #$27            ; 二重引用符か？
+        bne     :false          ; 引用符がなければC=0にしてリターン
+.1      tba                     ; Aレジスタに引用符の種類を保存しておく
+      ; // 終端の引用符をチェック
+        pshx
+.check  inx
+        ldab    0,x
+        beq     :err10          ; 終端文字なら"Print Statement Error"
+        cba
+        bne     :check
+        pulx
+      ; // 文字列の出力
+.loop   inx
+        ldab    0,x
+        cba                     ; 保存した引用符との比較
+        beq     :true           ; 文字列前後の引用符が一致すれば終了処理
+        jsr     write_char
+        bra     :loop
+.true   inx
+        sec
+        rts
+.false  clc
+        rts
+.err10  ldaa    #10             ; "Print statement error"
+        jmp     write_err_msg
+
+
+; -----------------------------------------------------------------------
+; タブを出力する
+; Write tabs
+;【引数】なし
+;【使用】B
+;【返値】なし
+; -----------------------------------------------------------------------
+write_tab:
+.top    jsr     write_space
+        tim     #7,<TabCount
+        bne     :top
+        rts
+
+
+; -----------------------------------------------------------------------
 ; 式を評価して変数に値を代入する
 ; Evaluate an expression and assign a value to a variable
 ;【引数】X:実行位置アドレス *VarAddress:変数のアドレス
-;【使用】A, B, X（関連ルーチンでUR0, UR1）
+;【使用】A, B, X（関連ルーチンでUR0, UR1, UR2, UR3）
 ;【返値】D:Integer X:次の実行位置アドレス
 ; -----------------------------------------------------------------------
 exe_let:
@@ -566,9 +652,149 @@ exe_let:
         ldx     <VariableAddr
         std     0,x             ; 変数に結果を保存
         pulx                    ; 実行位置アドレスを復帰
-        rts
+        jmp     exe_line
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
+
+
+; -----------------------------------------------------------------------
+; Print文を実行する
+; Execute 'print' statement
+;【引数】X:実行位置アドレス
+;【使用】B, X（下位ルーチンでA）
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_print:
+        oim     #1,<NewLineFlag ; 改行フラグを'ON'にする
+.loop   jsr     skip_space
+        beq     :finish         ; 終端文字なら改行して終了
+        jsr     write_quoted_str ; 引用符があれば文字列を出力する
+        bcs     :nlon
+        jsr     eval_expression
+        bcs     :int
+      ; // eval_expressionの返値がC=0だった場合は式が存在したのか確認する
+      ; // 'print'の次の文字がセミコロンとカンマであれば式は無かったとする
+.check  cmpb    #';'
+        beq     :nloff
+        cmpb    #','
+        beq     :tab
+        ldaa    #4              ; "Illegal expression"
+        jmp     write_err_msg
+.int    pshx                    ; 実行位置アドレスを退避
+        jsr     write_integer   ; 評価した式を出力
+        pulx                    ; 実行位置アドレスを復帰
+.nlon   oim     #1,<NewLineFlag ; 改行フラグを'ON'にする
+        jsr     skip_space
+        cmpb    #';'
+        beq     :nloff
+        cmpb    #','
+        bne     :finish
+.tab    jsr     write_tab       ; タブ出力
+.nloff  clr     <NewLineFlag    ; 改行フラグを'OFF'にする
+        inx                     ; 次の文字へ
+        bra     :loop
+.finish tst     <NewLineFlag
+        beq     :end            ; 改行フラグが'OFF'なら終了
+        jsr     write_crlf      ; 改行フラグが'ON'なら改行出力
+.end    jmp     exe_line
+
+
+; -----------------------------------------------------------------------
+; input文を実行する
+; Execute 'input' statement
+; -----------------------------------------------------------------------
+exe_input:
+        pshx
+        ldx     #:MSG
+        jsr     write_line
+        pulx
+        jmp     exe_line
+.MSG    .az     "Execute 'input' statement",#CR,#LF
+
+
+; -----------------------------------------------------------------------
+; if文を実行する
+; Execute 'if' statement
+; -----------------------------------------------------------------------
+exe_if:
+        pshx
+        ldx     #:MSG
+        jsr     write_line
+        pulx
+        jmp     exe_line
+.MSG    .az     "Execute 'if' statement",#CR,#LF
+
+
+; -----------------------------------------------------------------------
+; テーブル検索
+; Search the keyword table
+;【引数】X:テーブルの先頭アドレス, *ExePointer:実行位置アドレス
+;【使用】A, B, X
+;【結果】真(C=1) / 命令文実行. X:次の実行位置アドレス
+;        偽(C=0) / 何もせずにリターン X:引数*ExePointer（実行位置アドレス）
+; -----------------------------------------------------------------------
+search_table:
+.top    ldd     5,x             ; キーワードの初めの2文字をDレジスタに
+        cmpa    <COMPARE        ; 1文字目を比較
+        bne     :false
+        cmpb    <COMPARE+1      ; 2文字目を比較
+        bne     :false
+        ldd     7,x             ; 次の2文字をDレジスタに
+        tsta                    ; $00（終端記号）か？
+        beq     :true
+        cmpa    <COMPARE+2      ; 3文字目を比較
+        bne     :false
+        tstb                    ; $00（終端記号）か？
+        beq     :true
+        cmpb    <COMPARE+3      ; 4文字目を比較
+        bne     :false
+        ldd     9,x             ; 次の2文字をDレジスタに
+        tsta                    ; $00（終端記号）か？
+        beq     :true
+        cmpa    <COMPARE+4      ; 5文字目を比較
+        bne     :false
+        tstb                    ; $00（終端記号）か？
+        beq     :true
+        cmpb    <COMPARE+5      ; 6文字目を比較
+        bne     :false
+.true   ldab    2,x             ; B = 語長
+        ldx     3,x             ; X = 命令ルーチンのアドレス
+        ins                     ; 元のリターンアドレスを削除
+        ins
+        pshx                    ; スタックトップにリターンアドレスを積む
+        ldx     <ExePointer
+        abx                     ; 実行位置アドレスを文字数分プラスする
+        rts                     ; 命令ルーチンにジャンプ
+.false  ldx     0,x             ; リンクポインタを読み込み、次のキーワードに
+        bne     :top
+        ldx     <ExePointer     ; マッチしなければ実行位置ポインタを元に戻す
+        clc                     ; false: C=0
+        rts
+
+
+; ***********************************************************************
+;   キーワードテーブル Keyword table
+; ***********************************************************************
+; レコードの構造 Record structure
+; +--------+--------+--------+--------+--------+------+-~-+------+--------+
+; | リンクポインタ  |  語長  |命令ルーチン位置 |   キーワード    |  終端  |
+; |   Link pointer  | Length |Execution address|     Keyword     |  $00   |
+; +--------+--------+--------+--------+--------+------+-~-+------+--------+
+; キーワードは2文字以上6文字以下
+SMT_TABLE:      .eq     *
+.print          .dw     :input
+                .db     5
+                .dw     exe_print
+                .az     "print"
+.input          .dw     :if
+                .db     5
+                .dw     exe_input
+                .az     "input"
+.if             .dw     :bottom
+                .db     2
+                .dw     exe_if
+                .az     "if"
+.bottom         .dw     $0000           ; リンクポインタ$0000はテーブルの終端
 
 
 ; -----------------------------------------------------------------------
@@ -579,7 +805,10 @@ exe_let:
 ;【返値】なし
 ; -----------------------------------------------------------------------
 write_err_msg:
-        ldx     #ERRMSG
+        tst     <TabCount       ; タブ位置がゼロでなければ改行する
+        beq     :1
+        jsr     write_crlf
+.1      ldx     #ERRMSG
         jsr     write_line
         tab
         ldx     #ERRCODE
@@ -597,11 +826,13 @@ ERRCODE .dw     .err00
         .dw     .err04
         .dw     .err06
         .dw     .err08
+        .dw     .err10
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
 .err06  .az     "Calculate stack overflow"
 .err08  .az     "Zero Divide"
+.err10  .az     "Print statement error"
 
 
 ; ***********************************************************************
@@ -622,6 +853,14 @@ PUTUR:  psha
         jsr     write_line
         ldd     <UR1
         jsr     write_word
+        ldx     #:MSGUR2
+        jsr     write_line
+        ldd     <UR2
+        jsr     write_word
+        ldx     #:MSGUR3
+        jsr     write_line
+        ldd     <UR3
+        jsr     write_word
         jsr     write_crlf
         pulx
         pulb
@@ -629,3 +868,5 @@ PUTUR:  psha
         rts
 .MSGUR0          .az     "UR0="
 .MSGUR1          .az     " UR1="
+.MSGUR2          .az     " UR2="
+.MSGUR3          .az     " UR3="
