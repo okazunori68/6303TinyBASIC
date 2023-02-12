@@ -652,7 +652,7 @@ exe_let:
         ldx     <VariableAddr
         std     0,x             ; 変数に結果を保存
         pulx                    ; 実行位置アドレスを復帰
-        jmp     tb_main
+        jmp     exe_line
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
 
@@ -708,7 +708,7 @@ exe_input:
         ldx     #:MSG
         jsr     write_line
         pulx
-        jmp     tb_main
+        jmp     exe_line
 .MSG    .az     "Execute 'input' statement",#CR,#LF
 
 
@@ -721,7 +721,7 @@ exe_if:
         ldx     #:MSG
         jsr     write_line
         pulx
-        jmp     tb_main
+        jmp     exe_line
 .MSG    .az     "Execute 'if' statement",#CR,#LF
 
 
