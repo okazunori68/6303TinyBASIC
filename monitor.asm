@@ -52,6 +52,7 @@ VEC_IRQ         .bs     3
 VEC_SWI         .bs     3
 VEC_NMI         .bs     3
 BreakPointFlag  .bs     1
+TabCount        .bs     1       ; タブ用の文字数カウンタ
 ; General-Purpose Registers
 R0              .bs     2
 R1              .bs     2
@@ -427,7 +428,11 @@ write_char:
 .top    tim     #TDRE,<TRCSR
         beq     :top            ; TDRE=0だったら出力を待つ
         stab    <TDR
-        rts
+        inc     <TabCount       ; タブ文字カウンタを+1する
+        cmpb    #LF             ; 改行（LF）ならカウンタをクリア
+        bne     :end
+        clr     <TabCount
+.end    rts
 
 
 ; ------------------------------------------------
