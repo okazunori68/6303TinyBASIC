@@ -167,7 +167,8 @@ exe_line:
         cmpb    #'='
         bne     :err00          ; No. エラー処理へ
         inx                     ; Yes. 代入実行
-        jmp     exe_let
+        jsr     exe_let
+        bra     is_multi
 .cmd    ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
         std     <COMPARE
         ldd     2,x
@@ -671,7 +672,7 @@ exe_let:
         ldx     <VariableAddr
         std     0,x             ; 変数に結果を保存
         pulx                    ; 実行位置アドレスを復帰
-        jmp     is_multi
+        rts
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
 
