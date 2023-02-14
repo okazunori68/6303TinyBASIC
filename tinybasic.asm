@@ -167,7 +167,7 @@ exe_line:
         cmpb    #'='
         bne     :err00          ; No. エラー処理へ
         inx                     ; Yes. 代入実行
-        jsr     exe_let
+        jsr     assign_to_var
         bra     is_multi
 .cmd    ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
         std     <COMPARE
@@ -664,7 +664,7 @@ write_tab:
 ;【使用】A, B, X（関連ルーチンでUR0, UR1, UR2, UR3）
 ;【返値】D:Integer X:次の実行位置アドレス
 ; -----------------------------------------------------------------------
-exe_let:
+assign_to_var:
         jsr     skip_space
         jsr     eval_expression
         bcc     :err04
@@ -750,7 +750,7 @@ exe_input:
         ldx     <ExePointer     ; 実行位置アドレスを復帰
 .read   jsr     read_line
         ldx     #Rx_BUFFER
-        jsr     exe_let         ; 入力された内容を変数に代入
+        jsr     assign_to_var   ; 入力された内容を変数に代入
         ldx     <ExePointer     ; 実行位置アドレスを復帰
 .end    jmp     is_multi
 .err00  clra                    ; "Syntax error"
