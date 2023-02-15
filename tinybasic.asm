@@ -167,7 +167,8 @@ exe_line:
         cmpb    #'='
         bne     :err00          ; No. エラー処理へ
         inx                     ; Yes. 代入実行
-        jmp     exe_let
+        jsr     assign_to_var
+        bra     is_multi
 .cmd    ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
         std     <COMPARE
         ldd     2,x
@@ -663,7 +664,7 @@ write_tab:
 ;【使用】A, B, X（関連ルーチンでUR0, UR1, UR2, UR3）
 ;【返値】D:Integer X:次の実行位置アドレス
 ; -----------------------------------------------------------------------
-exe_let:
+assign_to_var:
         jsr     skip_space
         jsr     eval_expression
         bcc     :err04
@@ -671,7 +672,7 @@ exe_let:
         ldx     <VariableAddr
         std     0,x             ; 変数に結果を保存
         pulx                    ; 実行位置アドレスを復帰
-        jmp     is_multi
+        rts
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
 
@@ -725,12 +726,35 @@ exe_print:
 ; Execute 'input' statement
 ; -----------------------------------------------------------------------
 exe_input:
-        pshx
-        ldx     #:MSG
-        jsr     write_line
-        pulx
-        jmp     is_multi
-.MSG    .az     "Execute 'input' statement",#CR,#LF
+        jsr     skip_space
+        beq     :end            ; 終端文字なら改行して終了
+        jsr     write_quoted_str ; 引用符があれば文字列を出力する
+        bcc     :1
+        ldab    0,x
+        cmpb    #';'
+        bne     :err00
+        inx
+        jsr     skip_space
+.1      jsr     is_variable
+        bcc     :err00
+        ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
+        aslb                    ; B = 変数領域の下位バイト
+        std     <VariableAddr   ; 変数アドレスを保存
+      ; // 変数の後に余計な文字がないか確認
+      ; // 例えば "input a+b" など 
+        stx     <ExePointer     ; 実行位置アドレスを退避
+        jsr     skip_space
+        beq     :read           ; 終端文字なら入力へ
+        cmpb    #':'            ; ":"なら入力へ
+        bne     :err00          ; それ以外の文字ならエラー
+        ldx     <ExePointer     ; 実行位置アドレスを復帰
+.read   jsr     read_line
+        ldx     #Rx_BUFFER
+        jsr     assign_to_var   ; 入力された内容を変数に代入
+        ldx     <ExePointer     ; 実行位置アドレスを復帰
+.end    jmp     is_multi
+.err00  clra                    ; "Syntax error"
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
