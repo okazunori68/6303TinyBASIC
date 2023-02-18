@@ -853,14 +853,20 @@ exe_input:
 ; -----------------------------------------------------------------------
 ; if文を実行する
 ; Execute 'if' statement
+;【引数】X:実行位置アドレス
+;【使用】B, X
+;【返値】なし
 ; -----------------------------------------------------------------------
-exe_if:
-        pshx
-        ldx     #:MSG
-        jsr     write_line
-        pulx
-        jmp     is_multi
-.MSG    .az     "Execute 'if' statement",#CR,#LF
+exe_if: jsr     skip_space      ; 空白を読み飛ばし
+        beq     :end            ; 終端文字なら終了
+        jsr     eval_expression ; 式評価
+        bcc     :err04
+        tstb                    ; 真偽値はゼロか否かなので下位8bitのみで判断
+        beq     :end
+        jmp     exe_line        ; True
+.end    jmp     tb_main         ; Falseならば全て無視され行末まで進む
+.err04  ldaa    #4              ; "Illegal expression"
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
