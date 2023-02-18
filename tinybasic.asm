@@ -205,7 +205,7 @@ eval_expression:
         ldd     #CSTACK+40+1    ; 40byte分
         std     <CStackPtr
       ; // 式評価開始
-        bsr     expr_3rd
+        bsr     expr_4th
       ; // 計算結果をスタックトップから取り出す
         pshx
         ldx     <CStackPtr
@@ -213,6 +213,49 @@ eval_expression:
         pulx
         sec                     ; true:C=1
         rts
+
+expr_4th:
+        bsr     expr_3rd
+.loop   jsr     skip_space
+        cmpb    #'='            ; '='?
+        bne     :ltsign         ; NO. '<'記号のチェックへ
+        inx
+        bsr     expr_3rd
+        jsr     CS_eq           ; EQual to
+        bra     :loop
+.ltsign cmpb    #'<'            ; '<'?
+        bne     :gtsign         ; NO. '>'記号のチェックへ
+        inx
+        ldab    0,x
+        cmpb    #'>'            ; '<>'?
+        bne     :lte
+        inx
+        bsr     expr_3rd
+        jsr     CS_ne           ; Not Equal to
+        bra     :loop
+.lte    cmpb    #'='            ; '<='?
+        bne     :lt
+        inx
+        bsr     expr_3rd
+        jsr     CS_lte          ; Less Than or Equal to
+        bra     :loop
+.lt     bsr     expr_3rd
+        jsr     CS_lt           ; Less Than
+        bra     :loop
+.gtsign cmpb    #'>'            ; '>'?
+        bne     :end
+        inx
+        ldab    0,x
+        cmpb    #'='            ; '>='?
+        bne     :gt
+        inx
+        bsr     expr_3rd
+        jsr     CS_gte          ; Greater Than or Equal to
+        bra     :loop
+.gt     bsr     expr_3rd
+        jsr     CS_gt           ; Greater Than
+        bra     :loop
+.end    rts
 
 expr_3rd:
         bsr     expr_2nd
@@ -258,7 +301,7 @@ expr_1st:
 .SP     .eq     UR2
 .X      .eq     UR3
         jsr     skip_space
-        jsr     get_int_from_decimal    ; 数字チェックと取得
+        jsr     get_int_from_decimal ; 数字チェックと取得
         bcc     :var            ; 数字でなければ変数のチェックへ
         bra     :push           ; 数字であればスタックにプッシュ
 .var    jsr     is_variable     ; 変数か？
@@ -274,7 +317,7 @@ expr_1st:
 .paren  cmpb    #'('
         bne     :err
         inx
-        bsr     expr_3rd
+        jsr     expr_4th
         cmpb    #')'
         bne     :err
         inx
@@ -440,6 +483,56 @@ div_uint:
 .err08  ldaa    #8              ; "Zero Divide"
         jmp     write_err_msg
 
+CS_eq:  pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ldd     2,x
+        subd    0,x
+        beq     CS_true
+        bra     CS_false
+
+CS_lt:  pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ldd     2,x
+        subd    0,x
+        blt     CS_true
+        bra     CS_false
+
+CS_lte: pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ldd     2,x
+        subd    0,x
+        ble     CS_true
+        bra     CS_false
+
+CS_ne:  pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ldd     2,x
+        subd    0,x
+        bne     CS_true
+        bra     CS_false
+
+CS_gt:  pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ldd     2,x
+        subd    0,x
+        bgt     CS_true
+        bra     CS_false
+
+CS_gte: pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        ldd     2,x
+        subd    0,x
+        bge     CS_true
+        bra     CS_false
+
+CS_true:
+        ldd     #1
+        jmp     CS_store
+
+CS_false:
+        clra
+        clrb
+        jmp     CS_store
 
 ; -----------------------------------------------------------------------
 ; テキストバッファの10進文字列から数値を取得する
