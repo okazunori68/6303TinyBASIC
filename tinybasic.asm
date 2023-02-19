@@ -125,8 +125,22 @@ tb_main:
         jsr     write_char
         jsr     read_line
         ldx     #Rx_BUFFER      ; 実行位置アドレスをセット
+      ; // 行番号判定
+        jsr     get_int_from_decimal
+        bcc     direct_mode     ; 先頭が数値でなければダイレクトモード
+        subd    #0
+        bgt     edit_mode       ; 数値が1以上であれば編集モード
+.err12  ldaa    #12             ; "Invalid line number"
+        jmp     write_err_msg
+
+direct_mode:
         jmp     exe_line
 
+edit_mode:
+        ldx     #:MSG
+        jsr     write_line
+        jmp     tb_main
+.MSG    .az     "TODO: Execute edit mode.",#CR,#LF
 
 ; -----------------------------------------------------------------------
 ; マルチステートメントかどうか判定（is_multiはexe_lineの補助ルーチン）
@@ -971,12 +985,14 @@ ERRCODE .dw     .err00
         .dw     .err06
         .dw     .err08
         .dw     .err10
+        .dw     .err12
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
 .err06  .az     "Calculate stack overflow"
 .err08  .az     "Zero Divide"
 .err10  .az     "Print statement error"
+.err12  .az     "Invalid line number"
 
 
 ; ***********************************************************************
