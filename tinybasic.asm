@@ -93,6 +93,9 @@ Remainder       .bs     2       ; 剰余
 VariableAddr    .bs     2       ; 変数のアドレス
 ExePointer      .bs     2       ; 実行位置（Execute address）ポインタ
 NewLineFlag     .bs     1       ; 改行フラグ（print文） 0 = OFF, 1以上 = ON
+Source          .bs     2       ; 転送元アドレス
+Destination     .bs     2       ; 転送先アドレス
+Bytes           .bs     2       ; 転送バイト数
 
 ; General-Purpose Registers
 UR0             *
@@ -119,6 +122,35 @@ COMPARE         .bs     6       ; 文字列比較用バッファ
 init_tinybasic:
         tsx
         stx     <StackPointer
+
+
+;
+; *** テストコード ******************************************************
+;
+TEST_CODE:
+      ; // $500-5ffを$00-$ffで埋める
+        clra
+        ldx     #$0500
+.loop   staa    0,x
+        inca
+        inx
+        cpx     #$0600
+        bne     :loop
+      ; // src=$0500, dst=$0700, size=$fb
+        ldd     #$0500
+        std     <Source
+        ldd     #$0700
+        std     <Destination
+        ldd     #$00fb          ; 251バイト転送
+        std     <Bytes
+      ; // ブロック転送実行
+        jsr     mem_copy
+      ; // swiでモニタに戻り、$0700に251バイト転送されているか確認
+        swi
+;
+; ***********************************************************************
+;
+
 
 tb_main:
         ldab    #'>'
@@ -881,6 +913,60 @@ exe_if: jsr     skip_space      ; 空白を読み飛ばし
 .end    jmp     tb_main         ; Falseならば全て無視され行末まで進む
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
+
+
+; ------------------------------------------------
+; ブロック転送
+; Copy memory
+;【引数】Source:転送元アドレス
+;        Destination:転送先アドレス
+;        Bytes:転送バイト数
+;【使用】A, B, X, R0
+;【返値】なし
+; ------------------------------------------------
+mem_copy:
+.Offset .eq     UR0
+        ldd     <Bytes
+        beq     :end            ; 転送バイト数が0ならば即終了
+      ; // オフセットの計算
+        ldd     <Destination    ; dst - src
+        subd    <Source
+        std     <:Offset        ; offset = dst - src
+      ; // 終了判定用のアドレスを計算
+        ldd     <Source
+        addd    <Bytes          ; src + bytes = 転元終了アドレス
+        std     <Destination    ; 転送終了アドレスを代入
+      ; // 転送開始
+        ldx     <Source         ; 転送開始アドレスを代入
+      ; // 転送するバイト数が奇数か偶数か判断。
+      ; // 奇数ならByte転送x1 + Word転送、偶数ならWord転送
+        ldd     <Bytes
+        lsrd                    ; Bytes / 2, 奇数ならC=1
+        bcc     :loop           ; 偶数ならWord転送へ
+      ; // Byte転送
+        ldaa    0,x             ; A <- [source]
+        xgdx                    ; D = address, X = data
+        addd    <:Offset        ; src - offset = dst
+        xgdx                    ; D = data, X = address
+        staa    0,x             ; [dst] <- A
+        xgdx                    ; D = address, X = data
+        subd    <:Offset        ; dst + offset = src
+        xgdx                    ; D = data, X = address
+        bra     :odd
+      ; // Word転送
+.loop   ldd     0,x
+        xgdx
+        addd    <:Offset
+        xgdx
+        std     0,x
+        xgdx
+        subd    <:Offset
+        xgdx
+        inx
+.odd    inx
+        cpx     <Destination    ; 転送終了アドレスと現在のアドレスを比較
+        bne     :loop
+.end    rts
 
 
 ; -----------------------------------------------------------------------
