@@ -124,34 +124,6 @@ init_tinybasic:
         stx     <StackPointer
 
 
-;
-; *** テストコード ******************************************************
-;
-TEST_CODE:
-      ; // $500-5ffを$00-$ffで埋める
-        clra
-        ldx     #$0500
-.loop   staa    0,x
-        inca
-        inx
-        cpx     #$0600
-        bne     :loop
-      ; // src=$0500, dst=$0700, size=$fb
-        ldd     #$0500
-        std     <Source
-        ldd     #$0700
-        std     <Destination
-        ldd     #$00fb          ; 251バイト転送
-        std     <Bytes
-      ; // ブロック転送実行
-        jsr     mem_copy
-      ; // swiでモニタに戻り、$0700に251バイト転送されているか確認
-        swi
-;
-; ***********************************************************************
-;
-
-
 tb_main:
         ldab    #'>'
         jsr     write_char
