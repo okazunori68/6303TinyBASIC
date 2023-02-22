@@ -55,6 +55,8 @@ Rx_BUFFER       .eq     $0100   ; SCI Rx Buffer ($0100-0148,73byte)
 Rx_BUFFER_END   .eq     $0148   ; 73byte（72character）
 CSTACK          .eq     $0149   ; 計算スタック (Calculate stack, 40byte)
 VARIABLE        .eq     $01c2   ; 変数26文字 ($01c2-01f5, 52byte)
+USERAREATOP     .eq     $0400   ; ユーザーエリア開始アドレス
+USERAREABTM     .eq     $0dff-2 ; ユーザーエリア終了アドレス
 
 ; ***********************************************************************
 ;   システム変数 System variables
@@ -93,6 +95,12 @@ Remainder       .bs     2       ; 剰余
 VariableAddr    .bs     2       ; 変数のアドレス
 ExePointer      .bs     2       ; 実行位置（Execute address）ポインタ
 NewLineFlag     .bs     1       ; 改行フラグ（print文） 0 = OFF, 1以上 = ON
+Source          .bs     2       ; 転送元アドレス
+Destination     .bs     2       ; 転送先アドレス
+Bytes           .bs     2       ; 転送バイト数
+LineNumber      .bs     2       ; 行番号
+LineLength      .bs     2       ; 行の長さ
+PrgmEndAddr     .bs     2       ; BASICプログラムの最終アドレス
 
 ; General-Purpose Registers
 UR0             *
@@ -120,12 +128,76 @@ init_tinybasic:
         tsx
         stx     <StackPointer
 
+
+cold_start:
+        ldx     #USERAREATOP
+        stx     <PrgmEndAddr    ; BASICプログラムエリア開始アドレス = 終了アドレス
+        clra
+        clrb
+        std     0,x             ; プログラムエリアの先頭を終端行（$0000）にする
+        staa    <LineLength     ; 行の長さの上位バイトをゼロにする
+
+
 tb_main:
         ldab    #'>'
         jsr     write_char
         jsr     read_line
         ldx     #Rx_BUFFER      ; 実行位置アドレスをセット
+      ; // 行番号判定
+        jsr     get_int_from_decimal
+        bcc     direct_mode     ; 先頭が数値でなければダイレクトモード
+        subd    #0
+        bgt     edit_mode       ; 数値が1以上であれば編集モード
+.err12  ldaa    #12             ; "Invalid line number"
+        jmp     write_err_msg
+
+direct_mode:
         jmp     exe_line
+
+edit_mode:
+        stx     <ExePointer     ; バッファアドレスを保存（行番号の直後を指している）
+        std     <LineNumber     ; 行番号を保存
+      ; // 行の長さを取得
+        ldaa    #4              ; 行の長さの初期値（2+1+n+1, n=0）
+.loop   ldab    0,x
+        beq     :1
+        inca                    ; 行の長さを+1
+        inx                     ; バッファアドレスを+1
+        bra     :loop
+.1      staa    <LineLength+1   ; 行の長さをLineLengthの下位バイトに保存
+      ; // 転送の準備
+        ldx     <PrgmEndAddr    ; X <- プログラムの最終アドレス
+        ldd     <PrgmEndAddr 
+        addd    <LineLength     ; D <- 行の長さを足した最終アドレス
+        xgdx
+        cpx     #USERAREABTM    ; ユーザーエリアを超えていないかチェック
+        xgdx
+        bcc     :err14          ; "Memory size over"
+        std     <PrgmEndAddr    ; 新しい最終アドレスを設定
+      ; // 行番号と行の長さを転送
+        ldd     <LineNumber     ; 行番号を取得
+        std     0,x
+        inx
+        inx
+        ldab    <LineLength+1   ; 行の長さを取得
+        stab    0,x
+      ; // mem_copyの引数を設定
+        inx
+        stx     <Destination    ; 転送先アドレス（行の長さの直後）を設定
+        clra                    ; LineLengthの上位バイトをゼロにする
+        subb    #3              ; LineLengthから行番号・行の長さの3バイト分を引く
+        std     <Bytes          ; 転送バイト数を設定
+        ldd     <ExePointer     ; 行番号の直後を指しているバッファアドレスを復帰
+        std     <Source         ; 転送元アドレスを設定
+        jsr     mem_copy
+      ; // 終端行の挿入
+        ldx     <PrgmEndAddr
+        clra
+        clrb
+        std     0,x             ; プログラムの最終アドレスに$0000を加える
+        jmp     tb_main
+.err14  ldaa    #14              ; "Memory size over"
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
@@ -869,6 +941,60 @@ exe_if: jsr     skip_space      ; 空白を読み飛ばし
         jmp     write_err_msg
 
 
+; ------------------------------------------------
+; ブロック転送
+; Copy memory
+;【引数】Source:転送元アドレス
+;        Destination:転送先アドレス
+;        Bytes:転送バイト数
+;【使用】A, B, X, R0
+;【返値】なし
+; ------------------------------------------------
+mem_copy:
+.Offset .eq     UR0
+        ldd     <Bytes
+        beq     :end            ; 転送バイト数が0ならば即終了
+      ; // オフセットの計算
+        ldd     <Destination    ; dst - src
+        subd    <Source
+        std     <:Offset        ; offset = dst - src
+      ; // 終了判定用のアドレスを計算
+        ldd     <Source
+        addd    <Bytes          ; src + bytes = 転元終了アドレス
+        std     <Destination    ; 転送終了アドレスを代入
+      ; // 転送開始
+        ldx     <Source         ; 転送開始アドレスを代入
+      ; // 転送するバイト数が奇数か偶数か判断。
+      ; // 奇数ならByte転送x1 + Word転送、偶数ならWord転送
+        ldd     <Bytes
+        lsrd                    ; Bytes / 2, 奇数ならC=1
+        bcc     :loop           ; 偶数ならWord転送へ
+      ; // Byte転送
+        ldaa    0,x             ; A <- [source]
+        xgdx                    ; D = address, X = data
+        addd    <:Offset        ; src - offset = dst
+        xgdx                    ; D = data, X = address
+        staa    0,x             ; [dst] <- A
+        xgdx                    ; D = address, X = data
+        subd    <:Offset        ; dst + offset = src
+        xgdx                    ; D = data, X = address
+        bra     :odd
+      ; // Word転送
+.loop   ldd     0,x
+        xgdx
+        addd    <:Offset
+        xgdx
+        std     0,x
+        xgdx
+        subd    <:Offset
+        xgdx
+        inx
+.odd    inx
+        cpx     <Destination    ; 転送終了アドレスと現在のアドレスを比較
+        bne     :loop
+.end    rts
+
+
 ; -----------------------------------------------------------------------
 ; テーブル検索
 ; Search the keyword table
@@ -971,12 +1097,16 @@ ERRCODE .dw     .err00
         .dw     .err06
         .dw     .err08
         .dw     .err10
+        .dw     .err12
+        .dw     .err14
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
 .err06  .az     "Calculate stack overflow"
 .err08  .az     "Zero Divide"
 .err10  .az     "Print statement error"
+.err12  .az     "Invalid line number"
+.err14  .az     "Memory size over"
 
 
 ; ***********************************************************************
