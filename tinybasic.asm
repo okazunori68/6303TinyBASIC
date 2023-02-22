@@ -55,6 +55,8 @@ Rx_BUFFER       .eq     $0100   ; SCI Rx Buffer ($0100-0148,73byte)
 Rx_BUFFER_END   .eq     $0148   ; 73byte（72character）
 CSTACK          .eq     $0149   ; 計算スタック (Calculate stack, 40byte)
 VARIABLE        .eq     $01c2   ; 変数26文字 ($01c2-01f5, 52byte)
+USERAREATOP     .eq     $0400   ; ユーザーエリア開始アドレス
+USERAREABTM     .eq     $0dff-2 ; ユーザーエリア終了アドレス
 
 ; ***********************************************************************
 ;   システム変数 System variables
@@ -96,6 +98,9 @@ NewLineFlag     .bs     1       ; 改行フラグ（print文） 0 = OFF, 1以上
 Source          .bs     2       ; 転送元アドレス
 Destination     .bs     2       ; 転送先アドレス
 Bytes           .bs     2       ; 転送バイト数
+LineNumber      .bs     2       ; 行番号
+LineLength      .bs     2       ; 行の長さ
+PrgmEndAddr     .bs     2       ; BASICプログラムの最終アドレス
 
 ; General-Purpose Registers
 UR0             *
@@ -124,6 +129,15 @@ init_tinybasic:
         stx     <StackPointer
 
 
+cold_start:
+        ldx     #USERAREATOP
+        stx     <PrgmEndAddr    ; BASICプログラムエリア開始アドレス = 終了アドレス
+        clra
+        clrb
+        std     0,x             ; プログラムエリアの先頭を終端行（$0000）にする
+        staa    <LineLength     ; 行の長さの上位バイトをゼロにする
+
+
 tb_main:
         ldab    #'>'
         jsr     write_char
@@ -141,10 +155,50 @@ direct_mode:
         jmp     exe_line
 
 edit_mode:
-        ldx     #:MSG
-        jsr     write_line
+        stx     <ExePointer     ; バッファアドレスを保存（行番号の直後を指している）
+        std     <LineNumber     ; 行番号を保存
+      ; // 行の長さを取得
+        ldaa    #4              ; 行の長さの初期値（2+1+n+1, n=0）
+.loop   ldab    0,x
+        beq     :1
+        inca                    ; 行の長さを+1
+        inx                     ; バッファアドレスを+1
+        bra     :loop
+.1      staa    <LineLength+1   ; 行の長さをLineLengthの下位バイトに保存
+      ; // 転送の準備
+        ldx     <PrgmEndAddr    ; X <- プログラムの最終アドレス
+        ldd     <PrgmEndAddr 
+        addd    <LineLength     ; D <- 行の長さを足した最終アドレス
+        xgdx
+        cpx     #USERAREABTM    ; ユーザーエリアを超えていないかチェック
+        xgdx
+        bcc     :err14          ; "Memory size over"
+        std     <PrgmEndAddr    ; 新しい最終アドレスを設定
+      ; // 行番号と行の長さを転送
+        ldd     <LineNumber     ; 行番号を取得
+        std     0,x
+        inx
+        inx
+        ldab    <LineLength+1   ; 行の長さを取得
+        stab    0,x
+      ; // mem_copyの引数を設定
+        inx
+        stx     <Destination    ; 転送先アドレス（行の長さの直後）を設定
+        clra                    ; LineLengthの上位バイトをゼロにする
+        subb    #3              ; LineLengthから行番号・行の長さの3バイト分を引く
+        std     <Bytes          ; 転送バイト数を設定
+        ldd     <ExePointer     ; 行番号の直後を指しているバッファアドレスを復帰
+        std     <Source         ; 転送元アドレスを設定
+        jsr     mem_copy
+      ; // 終端行の挿入
+        ldx     <PrgmEndAddr
+        clra
+        clrb
+        std     0,x             ; プログラムの最終アドレスに$0000を加える
         jmp     tb_main
-.MSG    .az     "TODO: Execute edit mode.",#CR,#LF
+.err14  ldaa    #14              ; "Memory size over"
+        jmp     write_err_msg
+
 
 ; -----------------------------------------------------------------------
 ; マルチステートメントかどうか判定（is_multiはexe_lineの補助ルーチン）
@@ -1044,6 +1098,7 @@ ERRCODE .dw     .err00
         .dw     .err08
         .dw     .err10
         .dw     .err12
+        .dw     .err14
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
@@ -1051,6 +1106,7 @@ ERRCODE .dw     .err00
 .err08  .az     "Zero Divide"
 .err10  .az     "Print statement error"
 .err12  .az     "Invalid line number"
+.err14  .az     "Memory size over"
 
 
 ; ***********************************************************************
