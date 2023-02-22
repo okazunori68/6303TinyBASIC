@@ -145,13 +145,13 @@ tb_main:
         ldx     #Rx_BUFFER      ; 実行位置アドレスをセット
       ; // 行番号判定
         jsr     get_int_from_decimal
-        bcc     direct_mode     ; 先頭が数値でなければダイレクトモード
+        bcc     execute_mode    ; 先頭が数値でなければ実行モード
         subd    #0
         bgt     edit_mode       ; 数値が1以上であれば編集モード
 .err12  ldaa    #12             ; "Invalid line number"
         jmp     write_err_msg
 
-direct_mode:
+execute_mode:
         jmp     exe_line
 
 edit_mode:
