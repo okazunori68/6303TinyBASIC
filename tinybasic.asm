@@ -102,6 +102,7 @@ LineNumber      .bs     2       ; 行番号
 LineLength      .bs     2       ; 行の長さ
 PrgmEndAddr     .bs     2       ; BASICプログラムの最終アドレス
 ExeStateFlag    .bs     1       ; 実行状態フラグ 0 = run, 1以上 = direct
+ExeLineAddr     .bs     2       ; 実行中の行の先頭アドレス
 
 ; General-Purpose Registers
 UR0             *
@@ -219,14 +220,36 @@ edit_mode:
 ; -----------------------------------------------------------------------
 is_multi:
         jsr     skip_space
-        beq     :end
+        beq     eol_process
         cmpb    #':'
         bne     :err00
         inx
         bra     exe_line
-.end    jmp     tb_main
 .err00  clra                    ; "Syntax error"
         jmp     write_err_msg
+
+
+; -----------------------------------------------------------------------
+; 行末の処理（eol_processはexe_lineの補助ルーチン）
+;  - directモードであればそのまま終了
+;  - runモードであれば次の行のポインタを設定してrts
+; End-of-line processing
+;  - If in direct mode, terminate execution
+;  - If run mode, set the pointer to the next line and rts
+;【引数】なし
+;【使用】A, B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+eol_process:
+      ; // runモードであれば次の行のポインタを設定してrts
+        tst     <ExeStateFlag
+        bne     :end
+        ldx     <ExeLineAddr    ; 実行中の行の先頭アドレスを復帰
+        ldab    2,x             ; 行の長さを取得
+        abx                     ; 次の行の先頭アドレスを取得
+        stx     <ExeLineAddr    ; 次の行の先頭アドレスを保存
+        rts
+.end    jmp     tb_main         ; directモードであればそのまま終了
 
 
 ; -----------------------------------------------------------------------
@@ -238,7 +261,7 @@ is_multi:
 ; -----------------------------------------------------------------------
 exe_line:
         jsr     skip_space
-        beq     :end            ; 終端文字（$00）ならば終了
+        beq     eol_process     ; 終端文字（$00）ならば終了処理
       ; // 代入文のチェック
         jsr     is_variable     ; 変数か？
         bcc     :cmd            ; No. テーブル検索へ
@@ -251,6 +274,7 @@ exe_line:
         inx                     ; Yes. 代入実行
         jsr     assign_to_var
         bra     is_multi
+      ; // コマンド・ステートメントのチェック
 .cmd    ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
         std     <COMPARE
         ldd     2,x
@@ -264,10 +288,7 @@ exe_line:
         bra     :2
 .1      ldx     #SMT_TABLE
 .2      jsr     search_table    ; テーブル検索実行
-        bcc     :err00
-.end    jmp     tb_main
-
-.err00  clra                    ; Syntax error.
+.err00  clra                    ; search_tableから戻ってくるということは"Syntax error"
         jmp     write_err_msg
 
 
@@ -857,6 +878,36 @@ assign_to_var:
 
 
 ; -----------------------------------------------------------------------
+; runコマンドを実行する
+; Execute 'run' command
+;【引数】なし
+;【使用】A, B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_run:
+      ; // 変数領域の初期化
+        ldx     #VARIABLE
+        clra
+        clrb
+.1      std     0,x
+        inx
+        inx
+        cpx     #VARIABLE+52
+        bne     :1
+        clr     <ExeStateFlag   ; 実行状態フラグをrunに設定
+        ldx     #USERAREATOP
+.loop   stx     <ExeLineAddr    ; 実行中の行の先頭アドレスを保存
+        ldd     0,x
+        beq     :end            ; 行番号が$0000なら終了
+        inx
+        inx
+        inx
+        jsr     exe_line        ; 一行実行
+        bra     :loop
+.end    jmp     tb_main
+
+
+; -----------------------------------------------------------------------
 ; listコマンドを実行する
 ; Execute 'list' command
 ;【引数】なし
@@ -976,7 +1027,7 @@ exe_if: jsr     skip_space      ; 空白を読み飛ばし
         tstb                    ; 真偽値はゼロか否かなので下位8bitのみで判断
         beq     :end
         jmp     exe_line        ; True
-.end    jmp     tb_main         ; Falseならば全て無視され行末まで進む
+.end    jmp     eol_process     ; Falseならば全て無視され行末の処理へ
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
 
@@ -1092,6 +1143,10 @@ search_table:
 ; +--------+--------+--------+--------+--------+------+-~-+------+--------+
 ; キーワードは2文字以上6文字以下
 CMD_TABLE
+.run            .dw     :new
+                .db     3
+                .dw     exe_run
+                .az     "run"
 .new            .dw     :list
                 .db     3
                 .dw     cold_start
