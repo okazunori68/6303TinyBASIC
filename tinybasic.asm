@@ -131,12 +131,20 @@ init_tinybasic:
 
 
 cold_start:
+      ; // プログラムエリアの初期化
         ldx     #USERAREATOP
         stx     <PrgmEndAddr    ; BASICプログラムエリア開始アドレス = 終了アドレス
         clra
         clrb
         std     0,x             ; プログラムエリアの先頭を終端行（$0000）にする
         staa    <LineLength     ; 行の長さの上位バイトをゼロにする
+      ; // 変数領域の初期化
+        ldx     #VARIABLE
+.loop   std     0,x
+        inx
+        inx
+        cpx     #VARIABLE+52
+        bne     :loop
 
 
 tb_main:
@@ -1084,6 +1092,10 @@ search_table:
 ; +--------+--------+--------+--------+--------+------+-~-+------+--------+
 ; キーワードは2文字以上6文字以下
 CMD_TABLE
+.new            .dw     :list
+                .db     3
+                .dw     cold_start
+                .az     "new"
 .list           .dw     SMT_TABLE:print
                 .db     4
                 .dw     exe_list
