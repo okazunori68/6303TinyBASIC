@@ -15,6 +15,8 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 - 単純変数への代入と参照。aからzの26文字のみです
 - listコマンド
   - パラメータはありません。保存されたプログラムを全行表示します
+- newコマンド
+  - パラメータはありません。保存されたプログラムを消去し、変数を初期化します
 - print文
   - `print 式または変数`
   - `;`を付けると改行なしになります
