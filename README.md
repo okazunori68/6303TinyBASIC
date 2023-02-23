@@ -13,6 +13,8 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 - 四則演算。`%`で剰余（mod）
   - 数値は16bit符号付き整数のみ。オーバーフロー判定は行いません
 - 単純変数への代入と参照。aからzの26文字のみです
+- listコマンド
+  - パラメータはありません。保存されたプログラムを全行表示します
 - print文
   - `print 式または変数`
   - `;`を付けると改行なしになります
