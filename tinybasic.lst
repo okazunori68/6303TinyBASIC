@@ -153,1085 +153,1123 @@ FFFF-                 50      ROM_END         .eq     $ffff
 0096-                101      LineNumber      .bs     2       ; 行番号
 0098-                102      LineLength      .bs     2       ; 行の長さ
 009A-                103      PrgmEndAddr     .bs     2       ; BASICプログラムの最終アドレス
-009C-                104
-009C-                105      ; General-Purpose Registers
-009C-                106      UR0             *
-009C-                107      UR0H            .bs     1
-009D-                108      UR0L            .bs     1
-009E-                109      UR1             *
-009E-                110      UR1H            .bs     1
-009F-                111      UR1L            .bs     1
-00A0-                112      UR2             *
-00A0-                113      UR2H            .bs     1
-00A1-                114      UR2L            .bs     1
-00A2-                115      UR3             *
-00A2-                116      UR3H            .bs     1
-00A3-                117      UR3L            .bs     1
-00A4-                118      ; Work area
-00A4-                119      COMPARE         .bs     6       ; 文字列比較用バッファ
-00AA-                120
-00AA-                121      ; ***********************************************************************
-00AA-                122      ;   Program Start
-00AA-                123      ; ***********************************************************************
-0000-                124              .sm     CODE
-1000-                125              .or     PROGRAM_START
-1000-                126
-1000-                127      init_tinybasic:
-1000-30              128 ( 1)         tsx
-1001-DF 80           129 ( 4)         stx     <StackPointer
-1003-                130
+009C-                104      ExeStateFlag    .bs     1       ; 実行状態フラグ 0 = run, 1以上 = direct
+009D-                105
+009D-                106      ; General-Purpose Registers
+009D-                107      UR0             *
+009D-                108      UR0H            .bs     1
+009E-                109      UR0L            .bs     1
+009F-                110      UR1             *
+009F-                111      UR1H            .bs     1
+00A0-                112      UR1L            .bs     1
+00A1-                113      UR2             *
+00A1-                114      UR2H            .bs     1
+00A2-                115      UR2L            .bs     1
+00A3-                116      UR3             *
+00A3-                117      UR3H            .bs     1
+00A4-                118      UR3L            .bs     1
+00A5-                119      ; Work area
+00A5-                120      COMPARE         .bs     6       ; 文字列比較用バッファ
+00AB-                121
+00AB-                122      ; ***********************************************************************
+00AB-                123      ;   Program Start
+00AB-                124      ; ***********************************************************************
+0000-                125              .sm     CODE
+1000-                126              .or     PROGRAM_START
+1000-                127
+1000-                128      init_tinybasic:
+1000-30              129 ( 1)         tsx
+1001-DF 80           130 ( 4)         stx     <StackPointer
 1003-                131
-1003-                132      cold_start:
-1003-CE 04 00        133 ( 3)         ldx     #USERAREATOP
-1006-DF 9A           134 ( 4)         stx     <PrgmEndAddr    ; BASICプログラムエリア開始アドレス = 終了アドレス
-1008-4F              135 ( 1)         clra
-1009-5F              136 ( 1)         clrb
-100A-ED 00           137 ( 5)         std     0,x             ; プログラムエリアの先頭を終端行（$0000）にする
-100C-97 98           138 ( 3)         staa    <LineLength     ; 行の長さの上位バイトをゼロにする
-100E-                139
+1003-                132
+1003-                133      cold_start:
+1003-CE 04 00        134 ( 3)         ldx     #USERAREATOP
+1006-DF 9A           135 ( 4)         stx     <PrgmEndAddr    ; BASICプログラムエリア開始アドレス = 終了アドレス
+1008-4F              136 ( 1)         clra
+1009-5F              137 ( 1)         clrb
+100A-ED 00           138 ( 5)         std     0,x             ; プログラムエリアの先頭を終端行（$0000）にする
+100C-97 98           139 ( 3)         staa    <LineLength     ; 行の長さの上位バイトをゼロにする
 100E-                140
-100E-                141      tb_main:
-100E-C6 3E           142 ( 2)         ldab    #'>'
-1010-BD FF AC        143 ( 6)         jsr     write_char
-1013-BD FF A9        144 ( 6)         jsr     read_line
-1016-CE 01 00        145 ( 3)         ldx     #Rx_BUFFER      ; 実行位置アドレスをセット
-1019-                146            ; // 行番号判定
-1019-BD 12 BA        147 ( 6)         jsr     get_int_from_decimal
-101C-24 0A           148 ( 3)         bcc     direct_mode     ; 先頭が数値でなければダイレクトモード
-101E-83 00 00        149 ( 3)         subd    #0
-1021-2E 08           150 ( 3)         bgt     edit_mode       ; 数値が1以上であれば編集モード
-1023-86 0C           151 ( 2) .err12  ldaa    #12             ; "Invalid line number"
-1025-7E 15 08        152 ( 3)         jmp     write_err_msg
-1028-                153
-1028-                154      direct_mode:
-1028-7E 10 84        155 ( 3)         jmp     exe_line
-102B-                156
-102B-                157      edit_mode:
-102B-DF 8D           158 ( 4)         stx     <ExePointer     ; バッファアドレスを保存（行番号の直後を指している）
-102D-DD 96           159 ( 4)         std     <LineNumber     ; 行番号を保存
-102F-                160            ; // 行の長さを取得
-102F-86 04           161 ( 2)         ldaa    #4              ; 行の長さの初期値（2+1+n+1, n=0）
-1031-E6 00           162 ( 4) .loop   ldab    0,x
-1033-27 04           163 ( 3)         beq     :1
-1035-4C              164 ( 1)         inca                    ; 行の長さを+1
-1036-08              165 ( 1)         inx                     ; バッファアドレスを+1
-1037-20 F8           166 ( 3)         bra     :loop
-1039-97 99           167 ( 3) .1      staa    <LineLength+1   ; 行の長さをLineLengthの下位バイトに保存
-103B-                168            ; // 転送の準備
-103B-DE 9A           169 ( 4)         ldx     <PrgmEndAddr    ; X <- プログラムの最終アドレス
-103D-DC 9A           170 ( 4)         ldd     <PrgmEndAddr
-103F-D3 98           171 ( 4)         addd    <LineLength     ; D <- 行の長さを足した最終アドレス
-1041-18              172 ( 2)         xgdx
-1042-8C 0D FD        173 ( 3)         cpx     #USERAREABTM    ; ユーザーエリアを超えていないかチェック
-1045-18              174 ( 2)         xgdx
-1046-24 24           175 ( 3)         bcc     :err14          ; "Memory size over"
-1048-DD 9A           176 ( 4)         std     <PrgmEndAddr    ; 新しい最終アドレスを設定
-104A-                177            ; // 行番号と行の長さを転送
-104A-DC 96           178 ( 4)         ldd     <LineNumber     ; 行番号を取得
-104C-ED 00           179 ( 5)         std     0,x
-104E-08              180 ( 1)         inx
-104F-08              181 ( 1)         inx
-1050-D6 99           182 ( 3)         ldab    <LineLength+1   ; 行の長さを取得
-1052-E7 00           183 ( 4)         stab    0,x
-1054-                184            ; // mem_copyの引数を設定
-1054-08              185 ( 1)         inx
-1055-DF 92           186 ( 4)         stx     <Destination    ; 転送先アドレス（行の長さの直後）を設定
-1057-4F              187 ( 1)         clra                    ; LineLengthの上位バイトをゼロにする
-1058-C0 03           188 ( 2)         subb    #3              ; LineLengthから行番号・行の長さの3バイト分を引く
-105A-DD 94           189 ( 4)         std     <Bytes          ; 転送バイト数を設定
-105C-DC 8D           190 ( 4)         ldd     <ExePointer     ; 行番号の直後を指しているバッファアドレスを復帰
-105E-DD 90           191 ( 4)         std     <Source         ; 転送元アドレスを設定
-1060-BD 14 73        192 ( 6)         jsr     mem_copy
-1063-                193            ; // 終端行の挿入
-1063-DE 9A           194 ( 4)         ldx     <PrgmEndAddr
-1065-4F              195 ( 1)         clra
-1066-5F              196 ( 1)         clrb
-1067-ED 00           197 ( 5)         std     0,x             ; プログラムの最終アドレスに$0000を加える
-1069-7E 10 0E        198 ( 3)         jmp     tb_main
-106C-86 0E           199 ( 2) .err14  ldaa    #14              ; "Memory size over"
-106E-7E 15 08        200 ( 3)         jmp     write_err_msg
-1071-                201
-1071-                202
-1071-                203      ; -----------------------------------------------------------------------
-1071-                204      ; マルチステートメントかどうか判定（is_multiはexe_lineの補助ルーチン）
-1071-                205      ; Is a multi statement mark?
-1071-                206      ;【引数】X:実行位置アドレス
-1071-                207      ;【使用】B, X
-1071-                208      ;【返値】なし
-1071-                209      ; -----------------------------------------------------------------------
-1071-                210      is_multi:
-1071-BD 13 83        211 ( 6)         jsr     skip_space
-1074-27 07           212 ( 3)         beq     :end
-1076-C1 3A           213 ( 2)         cmpb    #':'
-1078-26 06           214 ( 3)         bne     :err00
-107A-08              215 ( 1)         inx
-107B-20 07           216 ( 3)         bra     exe_line
-107D-7E 10 0E        217 ( 3) .end    jmp     tb_main
-1080-4F              218 ( 1) .err00  clra                    ; "Syntax error"
-1081-7E 15 08        219 ( 3)         jmp     write_err_msg
-1084-                220
-1084-                221
-1084-                222      ; -----------------------------------------------------------------------
-1084-                223      ; 一行実行
-1084-                224      ; Execute one line
-1084-                225      ;【引数】X:実行位置アドレス
-1084-                226      ;【使用】A, B, X
-1084-                227      ;【返値】なし
-1084-                228      ; -----------------------------------------------------------------------
-1084-                229      exe_line:
-1084-BD 13 83        230 ( 6)         jsr     skip_space
-1087-27 2D           231 ( 3)         beq     :end            ; 終端文字（$00）ならば終了
-1089-                232            ; // 代入文のチェック
-1089-BD 13 6E        233 ( 6)         jsr     is_variable     ; 変数か？
-108C-24 12           234 ( 3)         bcc     :cmd            ; No. テーブル検索へ
-108E-86 01           235 ( 2)         ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
-1090-58              236 ( 1)         aslb                    ; B = 変数領域の下位バイト
-1091-DD 8B           237 ( 4)         std     <VariableAddr   ; 変数アドレスを保存
-1093-BD 13 83        238 ( 6)         jsr     skip_space      ; Yes. 代入文か？
-1096-C1 3D           239 ( 2)         cmpb    #'='
-1098-26 1F           240 ( 3)         bne     :err00          ; No. エラー処理へ
-109A-08              241 ( 1)         inx                     ; Yes. 代入実行
-109B-BD 13 C0        242 ( 6)         jsr     assign_to_var
-109E-20 D1           243 ( 3)         bra     is_multi
-10A0-EC 00           244 ( 5) .cmd    ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
-10A2-DD A4           245 ( 4)         std     <COMPARE
-10A4-EC 02           246 ( 5)         ldd     2,x
-10A6-DD A6           247 ( 4)         std     <COMPARE+2
-10A8-EC 04           248 ( 5)         ldd     4,x
-10AA-DD A8           249 ( 4)         std     <COMPARE+4
-10AC-DF 8D           250 ( 4)         stx     <ExePointer     ; 実行位置アドレスを退避
-10AE-CE 14 E8        251 ( 3)         ldx     #SMT_TABLE      ; 文字列テーブルアドレスをセット
-10B1-BD 14 AB        252 ( 6)         jsr     search_table    ; テーブル検索実行
-10B4-24 03           253 ( 3)         bcc     :err00
-10B6-7E 10 0E        254 ( 3) .end    jmp     tb_main
-10B9-                255
-10B9-4F              256 ( 1) .err00  clra                    ; syntax error.
-10BA-7E 15 08        257 ( 3)         jmp     write_err_msg
-10BD-                258
-10BD-                259
-10BD-                260      ; -----------------------------------------------------------------------
-10BD-                261      ; 式を評価する
-10BD-                262      ; Evaluate the expression
-10BD-                263      ;【引数】B:アスキーコード X:実行位置アドレス
-10BD-                264      ;【使用】A, B, X, UR2, UR3 （下位ルーチンでUR0, UR1）
-10BD-                265      ;【返値】真(C=1) / D:Integer X:次の実行位置アドレス
-10BD-                266      ;        偽(C=0) / X:現在の実行位置アドレス
-10BD-                267      ; -----------------------------------------------------------------------
-10BD-                268      eval_expression:
-00A0-                269      .SP     .eq     UR2
-00A2-                270      .X      .eq     UR3
-10BD-                271            ; // エラー時SPとXを元に戻すために初期値をUR2とUR3に退避しておく
-10BD-DF A2           272 ( 4)         stx     <:X
-10BF-30              273 ( 1)         tsx
-10C0-DF A0           274 ( 4)         stx     <:SP
-10C2-DE A2           275 ( 4)         ldx     <:X
-10C4-                276            ; // 計算スタックの初期化
-10C4-CC 01 72        277 ( 3)         ldd     #CSTACK+40+1    ; 40byte分
-10C7-DD 82           278 ( 4)         std     <CStackPtr
-10C9-                279            ; // 式評価開始
-10C9-8D 08           280 ( 5)         bsr     expr_4th
-10CB-                281            ; // 計算結果をスタックトップから取り出す
-10CB-3C              282 ( 5)         pshx
-10CC-DE 82           283 ( 4)         ldx     <CStackPtr
-10CE-EC 00           284 ( 5)         ldd     0,x
-10D0-38              285 ( 4)         pulx
-10D1-0D              286 ( 1)         sec                     ; true:C=1
-10D2-39              287 ( 5)         rts
-10D3-                288
-10D3-                289      expr_4th:
-10D3-8D 50           290 ( 5)         bsr     expr_3rd
-10D5-BD 13 83        291 ( 6) .loop   jsr     skip_space
-10D8-C1 3D           292 ( 2)         cmpb    #'='            ; '='?
-10DA-26 08           293 ( 3)         bne     :ltsign         ; NO. '<'記号のチェックへ
-10DC-08              294 ( 1)         inx
-10DD-8D 46           295 ( 5)         bsr     expr_3rd
-10DF-BD 12 6D        296 ( 6)         jsr     CS_eq           ; EQual to
-10E2-20 F1           297 ( 3)         bra     :loop
-10E4-C1 3C           298 ( 2) .ltsign cmpb    #'<'            ; '<'?
-10E6-26 22           299 ( 3)         bne     :gtsign         ; NO. '>'記号のチェックへ
-10E8-08              300 ( 1)         inx
-10E9-E6 00           301 ( 4)         ldab    0,x
-10EB-C1 3E           302 ( 2)         cmpb    #'>'            ; '<>'?
-10ED-26 08           303 ( 3)         bne     :lte
-10EF-08              304 ( 1)         inx
-10F0-8D 33           305 ( 5)         bsr     expr_3rd
-10F2-BD 12 8E        306 ( 6)         jsr     CS_ne           ; Not Equal to
-10F5-20 DE           307 ( 3)         bra     :loop
-10F7-C1 3D           308 ( 2) .lte    cmpb    #'='            ; '<='?
-10F9-26 08           309 ( 3)         bne     :lt
-10FB-08              310 ( 1)         inx
-10FC-8D 27           311 ( 5)         bsr     expr_3rd
-10FE-BD 12 83        312 ( 6)         jsr     CS_lte          ; Less Than or Equal to
-1101-20 D2           313 ( 3)         bra     :loop
-1103-8D 20           314 ( 5) .lt     bsr     expr_3rd
-1105-BD 12 78        315 ( 6)         jsr     CS_lt           ; Less Than
-1108-20 CB           316 ( 3)         bra     :loop
-110A-C1 3E           317 ( 2) .gtsign cmpb    #'>'            ; '>'?
-110C-26 16           318 ( 3)         bne     :end
-110E-08              319 ( 1)         inx
-110F-E6 00           320 ( 4)         ldab    0,x
-1111-C1 3D           321 ( 2)         cmpb    #'='            ; '>='?
-1113-26 08           322 ( 3)         bne     :gt
-1115-08              323 ( 1)         inx
-1116-8D 0D           324 ( 5)         bsr     expr_3rd
-1118-BD 12 A4        325 ( 6)         jsr     CS_gte          ; Greater Than or Equal to
-111B-20 B8           326 ( 3)         bra     :loop
-111D-8D 06           327 ( 5) .gt     bsr     expr_3rd
-111F-BD 12 99        328 ( 6)         jsr     CS_gt           ; Greater Than
-1122-20 B1           329 ( 3)         bra     :loop
-1124-39              330 ( 5) .end    rts
-1125-                331
-1125-                332      expr_3rd:
-1125-8D 1C           333 ( 5)         bsr     expr_2nd
-1127-BD 13 83        334 ( 6) .loop   jsr     skip_space
-112A-C1 2B           335 ( 2)         cmpb    #'+'
-112C-26 08           336 ( 3)         bne     :minus
-112E-08              337 ( 1)         inx
-112F-8D 12           338 ( 5)         bsr     expr_2nd
-1131-BD 11 B8        339 ( 6)         jsr     CS_add
-1134-20 F1           340 ( 3)         bra     :loop
-1136-C1 2D           341 ( 2) .minus  cmpb    #'-'
-1138-26 08           342 ( 3)         bne     :end
-113A-08              343 ( 1)         inx
-113B-8D 06           344 ( 5)         bsr     expr_2nd
-113D-BD 11 C1        345 ( 6)         jsr     CS_sub
-1140-20 E5           346 ( 3)         bra     :loop
-1142-39              347 ( 5) .end    rts
-1143-                348
-1143-                349      expr_2nd:
-1143-8D 28           350 ( 5)         bsr     expr_1st
-1145-BD 13 83        351 ( 6) .loop   jsr     skip_space
-1148-C1 2A           352 ( 2)         cmpb    #'*'
-114A-26 08           353 ( 3)         bne     :div
-114C-08              354 ( 1)         inx
-114D-8D 1E           355 ( 5)         bsr     expr_1st
-114F-BD 11 CA        356 ( 6)         jsr     CS_mul
-1152-20 F1           357 ( 3)         bra     :loop
-1154-C1 2F           358 ( 2) .div    cmpb    #'/'
-1156-26 08           359 ( 3)         bne     :mod
-1158-08              360 ( 1)         inx
-1159-8D 12           361 ( 5)         bsr     expr_1st
-115B-BD 11 E7        362 ( 6)         jsr     CS_div
-115E-20 E5           363 ( 3)         bra     :loop
-1160-C1 25           364 ( 2) .mod    cmpb    #'%'
-1162-26 08           365 ( 3)         bne     :end
-1164-08              366 ( 1)         inx
-1165-8D 06           367 ( 5)         bsr     expr_1st
-1167-BD 12 03        368 ( 6)         jsr     CS_mod
-116A-20 D9           369 ( 3)         bra     :loop
-116C-39              370 ( 5) .end    rts
-116D-                371
-116D-                372      expr_1st:
-00A0-                373      .SP     .eq     UR2
-00A2-                374      .X      .eq     UR3
-116D-BD 13 83        375 ( 6)         jsr     skip_space
-1170-BD 12 BA        376 ( 6)         jsr     get_int_from_decimal ; 数字チェックと取得
-1173-24 02           377 ( 3)         bcc     :var            ; 数字でなければ変数のチェックへ
-1175-20 1D           378 ( 3)         bra     :push           ; 数字であればスタックにプッシュ
-1177-BD 13 6E        379 ( 6) .var    jsr     is_variable     ; 変数か？
-117A-24 0A           380 ( 3)         bcc     :paren          ; 変数でなければカッコのチェックへ
-117C-                381            ; // 変数値の取得
-117C-3C              382 ( 5)         pshx                    ; 実行位置アドレスを退避
-117D-86 01           383 ( 2)         ldaa    #VARIABLE>>8    ; A = 変数領域の上位バイト
-117F-58              384 ( 1)         aslb                    ; B = 変数領域の下位バイト
-1180-18              385 ( 2)         xgdx                    ; X = 変数のアドレス
-1181-EC 00           386 ( 5)         ldd     0,x             ; D <- 変数の値
-1183-38              387 ( 4)         pulx                    ; 実行位置アドレスを復帰
-1184-20 0E           388 ( 3)         bra     :push           ; 変数の値をスタックにプッシュ
-1186-C1 28           389 ( 2) .paren  cmpb    #'('
-1188-26 1A           390 ( 3)         bne     :err
-118A-08              391 ( 1)         inx
-118B-BD 10 D3        392 ( 6)         jsr     expr_4th
-118E-C1 29           393 ( 2)         cmpb    #')'
-1190-26 12           394 ( 3)         bne     :err
-1192-08              395 ( 1)         inx
-1193-39              396 ( 5)         rts
-1194-3C              397 ( 5) .push   pshx                    ; 実行位置アドレスを退避
-1195-DE 82           398 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-1197-09              399 ( 1)         dex
-1198-09              400 ( 1)         dex
-1199-8C 01 47        401 ( 3)         cpx     #CSTACK-2       ; スタックオーバーフローのチェック
-119C-25 0D           402 ( 3)         bcs     :err06
-119E-ED 00           403 ( 5)         std     0,x
-11A0-DF 82           404 ( 4)         stx     <CStackPtr
-11A2-38              405 ( 4)         pulx                    ; 実行位置アドレスを復帰
-11A3-39              406 ( 5)         rts
-11A4-                407            ; // 戻り先をeval_expressionの呼び出し元に戻してリターン
-11A4-DE A0           408 ( 4) .err    ldx     <:SP
-11A6-35              409 ( 1)         txs
-11A7-DE A2           410 ( 4)         ldx     <:X
-11A9-0C              411 ( 1)         clc                     ; false:C=0
-11AA-39              412 ( 5)         rts
-11AB-86 06           413 ( 2) .err06  ldaa    #6              ; "Calculate stack overflow"
-11AD-7E 15 08        414 ( 3)         jmp     write_err_msg
-11B0-                415
-11B0-                416      ;
-11B0-                417      ; Arithmetic operator
-11B0-                418      ;
-11B0-                419      CS_store:
-11B0-08              420 ( 1)         inx
-11B1-08              421 ( 1)         inx
-11B2-ED 00           422 ( 5)         std     0,x
-11B4-DF 82           423 ( 4)         stx     <CStackPtr      ; 計算スタックポインタを保存
-11B6-38              424 ( 4)         pulx                    ; 実行位置アドレスを復帰
-11B7-39              425 ( 5)         rts
-11B8-                426
-11B8-3C              427 ( 5) CS_add: pshx                    ; 実行位置アドレスを退避
-11B9-DE 82           428 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-11BB-EC 02           429 ( 5)         ldd     2,x
-11BD-E3 00           430 ( 5)         addd    0,x
-11BF-20 EF           431 ( 3)         bra     CS_store
-11C1-                432
-11C1-3C              433 ( 5) CS_sub: pshx                    ; 実行位置アドレスを退避
-11C2-DE 82           434 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-11C4-EC 02           435 ( 5)         ldd     2,x
-11C6-A3 00           436 ( 5)         subd    0,x
-11C8-20 E6           437 ( 3)         bra     CS_store
-11CA-                438
-11CA-                439      CS_mul:
-009C-                440      .Result         .eq     UR0
-11CA-3C              441 ( 5)         pshx                    ; 実行位置アドレスを退避
-11CB-DE 82           442 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-11CD-                443              ; B * D
-11CD-A6 03           444 ( 4)         ldaa    3,x             ;「B」をAレジスタに代入
-11CF-E6 01           445 ( 4)         ldab    1,x             ;「D」をBレジスタに代入
-11D1-3D              446 ( 7)         mul                     ; B * D
-11D2-DD 9C           447 ( 4)         std     <:Result        ;「B*D」を保存
-11D4-                448              ; A * D
-11D4-EC 01           449 ( 5)         ldd     1,x             ;「D」をAレジスタに、「A」をBレジスタに同時に代入
-11D6-3D              450 ( 7)         mul                     ; A * D
-11D7-DB 9C           451 ( 3)         addb    <:Result        ;「A*D」の下位8bitをResultの上位8bitに加算
-11D9-D7 9C           452 ( 3)         stab    <:Result        ; Resultの上位8bitを保存
-11DB-                453              ; C * B
-11DB-A6 00           454 ( 4)         ldaa    0,x             ;「C」をAレジスタに代入
-11DD-E6 03           455 ( 4)         ldab    3,x             ;「B」をBレジスタに代入
-11DF-3D              456 ( 7)         mul                     ; C * B
-11E0-DB 9C           457 ( 3)         addb    <:Result        ;「C*B」の下位8bitをResultの上位8bitに加算
-11E2-17              458 ( 1)         tba                     ; Resultの上位8bitをAレジスタに転送
-11E3-D6 9D           459 ( 3)         ldab    <:Result+1      ; Resultの下位8bitをBレジスタに転送
-11E5-20 C9           460 ( 3)         bra     CS_store
-11E7-                461
-11E7-                462      ;
-11E7-                463      ; 符号付き割り算の考え方
-11E7-                464      ; ・剰余は除数の符号と同一
-11E7-                465      ;   ・ 7 / 3  = 商  2、剰余  1
-11E7-                466      ;   ・-7 / 3  = 商 -3、剰余  2
-11E7-                467      ;   ・ 7 / -3 = 商 -3、剰余 -2
-11E7-                468      ;   ・-7 / -3 = 商  2、剰余 -1
-11E7-                469      ;  商 ：1.被除数の符号と序数の符号が一致していないときには1足して符号反転する
-11E7-                470      ;       2.ただし、除数がゼロの場合は1は足さない
-11E7-                471      ; 剰余：1.被除数の符号と序数の符号が一致していないときには
-11E7-                472      ;         除数の絶対値から剰余の絶対値を引く
-11E7-                473      ;       2.その結果を除数と同じ符号にする
-11E7-                474      ;       3.ただし、除数がゼロの場合は剰余もゼロ
-11E7-                475      ;
-11E7-3C              476 ( 5) CS_div: pshx                    ; 実行位置アドレスを退避
-11E8-DE 82           477 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-11EA-8D 37           478 ( 5)         bsr     div_uint        ; 除算実行
-11EC-18              479 ( 2)         xgdx                    ; D <- 商（Quotient） X <- 剰余（Remainder）
-11ED-7D 00 85        480 ( 4)         tst     <QuoSignFlag    ; 商の符号チェック
-11F0-27 0D           481 ( 3)         beq     :end            ; '+'なら終了
-11F2-8C 00 00        482 ( 3)         cpx     #0              ; 剰余はゼロか？
-11F5-27 03           483 ( 3)         beq     :sign
-11F7-C3 00 01        484 ( 3)         addd    #1              ; ゼロでなければ商に1を足す
-11FA-43              485 ( 1) .sign   coma                    ; Dレジスタの値を2の補数にする
-11FB-53              486 ( 1)         comb
-11FC-C3 00 01        487 ( 3)         addd    #1
-11FF-DE 82           488 ( 4) .end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
-1201-20 AD           489 ( 3)         bra     CS_store
-1203-                490
-1203-3C              491 ( 5) CS_mod: pshx                    ; 実行位置アドレスを退避
-1204-DE 82           492 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-1206-8D 1B           493 ( 5)         bsr     div_uint        ; 除算実行。D = 剰余
-1208-DD 89           494 ( 4)         std     <Remainder      ; 剰余はゼロか？
-120A-27 13           495 ( 3)         beq     :end            ; ゼロであれば終了
-120C-7D 00 85        496 ( 4)         tst     <QuoSignFlag    ; 被除数・除数の符号一致チェック
-120F-27 04           497 ( 3)         beq     :sign           ; 0なら一致しているので剰余の符号チェック
-1211-DC 87           498 ( 4)         ldd     <Divisor        ; 1なら一致していないので除数 - 剰余
-1213-93 89           499 ( 4)         subd    <Remainder
-1215-7D 00 86        500 ( 4) .sign   tst     <RemSignFlag    ; 剰余の符号チェック
-1218-27 05           501 ( 3)         beq     :end            ; '+'なら終了
-121A-43              502 ( 1)         coma                    ; '-'なら2の補数にする
-121B-53              503 ( 1)         comb
-121C-C3 00 01        504 ( 3)         addd    #1
-121F-DE 82           505 ( 4) .end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
-1221-20 8D           506 ( 3)         bra     CS_store
-1223-                507
-1223-                508      div_uint:
-009C-                509      .Counter        .eq     UR0H
-1223-EC 00           510 ( 5)         ldd     0,x             ; ゼロ除算チェック
-1225-27 41           511 ( 3)         beq     :err08          ; 除数がゼロならエラー
-1227-5F              512 ( 1)         clrb
-1228-D7 85           513 ( 3)         stab    <QuoSignFlag    ; 商の符号フラグを初期化
-122A-D7 86           514 ( 3)         stab    <RemSignFlag    ; 剰余の符号フラグを初期化
-122C-C6 10           515 ( 2)         ldab    #16             ; ループカウンターをセット（16bit分）
-122E-D7 9C           516 ( 3)         stab    <:Counter
-1230-                517              ; // 剰余の符号フラグの設定
-1230-EC 00           518 ( 5)         ldd     0,x             ; Dレジスタに除数を代入
-1232-2A 03           519 ( 3)         bpl     :1              ; 除数が正であれば剰余の符号は正（0）
-1234-7C 00 86        520 ( 6)         inc     <RemSignFlag    ; 除数が負であれば剰余の符号は負（1）
-1237-                521              ; // 商の符号フラグの設定
-1237-A8 02           522 ( 4) .1      eora    2,x             ; 被除数の符号と除数の符号のXORを取る
-1239-2A 03           523 ( 3)         bpl     :2              ; 被除数と除数の符号が同じなら商の符号は正（0）
-123B-7C 00 85        524 ( 6)         inc     <QuoSignFlag    ; 被除数と除数の符号が違えば商の符号は負（1）
-123E-                525              ; // 除数を絶対値にする
-123E-EC 00           526 ( 5) .2      ldd     0,x             ; D <- 除数
-1240-2A 05           527 ( 3)         bpl     :3
-1242-43              528 ( 1)         coma                    ; 除数が負なら絶対値にする
-1243-53              529 ( 1)         comb
-1244-C3 00 01        530 ( 3)         addd    #1
-1247-DD 87           531 ( 4) .3      std     <Divisor        ; 除数を保存
-1249-                532              ; // 非除数を絶対値にする
-1249-EC 02           533 ( 5)         ldd     2,x             ; D <- 被除数
-124B-2A 05           534 ( 3)         bpl     :4
-124D-43              535 ( 1)         coma                    ; 被除数が負なら絶対値にする
-124E-53              536 ( 1)         comb
-124F-C3 00 01        537 ( 3)         addd    #1
-1252-                538              ; // 除算実行
-1252-18              539 ( 2) .4      xgdx                    ; X <- 被除数
-1253-4F              540 ( 1)         clra                    ; D（WORK）をクリア
-1254-5F              541 ( 1)         clrb
-1255-18              542 ( 2) .loop   xgdx                    ; X（被除数）を左シフト
-1256-05              543 ( 1)         asld
-1257-18              544 ( 2)         xgdx
-1258-59              545 ( 1)         rolb                    ; 被除数のMSBをWORKのLSBに代入
-1259-49              546 ( 1)         rola
-125A-93 87           547 ( 4)         subd    <Divisor        ; WORK - 除数
-125C-08              548 ( 1)         inx                     ; XレジスタのLSBを1にセットしておく
-125D-24 03           549 ( 3)         bcc     :5              ; WORKから除数を引けた？
-125F-D3 87           550 ( 4)         addd    <Divisor        ; 引けなければ除数を足して...
-1261-09              551 ( 1)         dex                     ; XレジスタのLSBを0に戻す
-1262-7A 00 9C        552 ( 6) .5      dec     <:Counter       ; ループカウンターを1引く
-1265-26 EE           553 ( 3)         bne     :loop
-1267-39              554 ( 5)         rts
-1268-86 08           555 ( 2) .err08  ldaa    #8              ; "Zero Divide"
-126A-7E 15 08        556 ( 3)         jmp     write_err_msg
-126D-                557
-126D-3C              558 ( 5) CS_eq:  pshx                    ; 実行位置アドレスを退避
-126E-DE 82           559 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-1270-EC 02           560 ( 5)         ldd     2,x
-1272-A3 00           561 ( 5)         subd    0,x
-1274-27 39           562 ( 3)         beq     CS_true
-1276-20 3D           563 ( 3)         bra     CS_false
-1278-                564
-1278-3C              565 ( 5) CS_lt:  pshx                    ; 実行位置アドレスを退避
-1279-DE 82           566 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-127B-EC 02           567 ( 5)         ldd     2,x
-127D-A3 00           568 ( 5)         subd    0,x
-127F-2D 2E           569 ( 3)         blt     CS_true
-1281-20 32           570 ( 3)         bra     CS_false
-1283-                571
-1283-3C              572 ( 5) CS_lte: pshx                    ; 実行位置アドレスを退避
-1284-DE 82           573 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-1286-EC 02           574 ( 5)         ldd     2,x
-1288-A3 00           575 ( 5)         subd    0,x
-128A-2F 23           576 ( 3)         ble     CS_true
-128C-20 27           577 ( 3)         bra     CS_false
-128E-                578
-128E-3C              579 ( 5) CS_ne:  pshx                    ; 実行位置アドレスを退避
-128F-DE 82           580 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-1291-EC 02           581 ( 5)         ldd     2,x
-1293-A3 00           582 ( 5)         subd    0,x
-1295-26 18           583 ( 3)         bne     CS_true
-1297-20 1C           584 ( 3)         bra     CS_false
-1299-                585
-1299-3C              586 ( 5) CS_gt:  pshx                    ; 実行位置アドレスを退避
-129A-DE 82           587 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-129C-EC 02           588 ( 5)         ldd     2,x
-129E-A3 00           589 ( 5)         subd    0,x
-12A0-2E 0D           590 ( 3)         bgt     CS_true
-12A2-20 11           591 ( 3)         bra     CS_false
-12A4-                592
-12A4-3C              593 ( 5) CS_gte: pshx                    ; 実行位置アドレスを退避
-12A5-DE 82           594 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-12A7-EC 02           595 ( 5)         ldd     2,x
-12A9-A3 00           596 ( 5)         subd    0,x
-12AB-2C 02           597 ( 3)         bge     CS_true
-12AD-20 06           598 ( 3)         bra     CS_false
-12AF-                599
-12AF-                600      CS_true:
-12AF-CC 00 01        601 ( 3)         ldd     #1
-12B2-7E 11 B0        602 ( 3)         jmp     CS_store
-12B5-                603
-12B5-                604      CS_false:
-12B5-4F              605 ( 1)         clra
-12B6-5F              606 ( 1)         clrb
-12B7-7E 11 B0        607 ( 3)         jmp     CS_store
-12BA-                608
-12BA-                609      ; -----------------------------------------------------------------------
-12BA-                610      ; テキストバッファの10進文字列から数値を取得する
-12BA-                611      ; Get a integer from a decimal string in a text buffer
-12BA-                612      ;【引数】X:バッファアドレス
-12BA-                613      ;【使用】A, B, X, UR0, UR1
-12BA-                614      ;【返値】真(C=1) / D:Integer X:次のバッファアドレス
-12BA-                615      ;        偽(C=0) / B:現在の位置のアスキーコード X:現在のバッファアドレス
-12BA-                616      ; -----------------------------------------------------------------------
-12BA-                617      get_int_from_decimal:
-009C-                618      .RetValue       .eq     UR0     ; Return Value
-009E-                619      .TempValue      .eq     UR1     ; Temporary Value
-12BA-4F              620 ( 1)         clra
-12BB-5F              621 ( 1)         clrb
-12BC-DD 9C           622 ( 4)         std     <:RetValue
-12BE-97 9E           623 ( 3)         staa    <:TempValue
-12C0-97 84           624 ( 3)         staa    <SignFlag
-12C2-E6 00           625 ( 4)         ldab    0,x             ; 1文字取得
-12C4-C1 2D           626 ( 2)         cmpb    #'-'            ; マイナス記号か？
-12C6-26 05           627 ( 3)         bne     :1
-12C8-7C 00 84        628 ( 6)         inc     <SignFlag       ; Yes. 符号フラグをセット
-12CB-20 0B           629 ( 3)         bra     :next
-12CD-C1 2B           630 ( 2) .1      cmpb    #'+'            ; プラス記号か？
-12CF-27 07           631 ( 3)         beq     :next
-12D1-BD FF C1        632 ( 6)         jsr     is_decimal_char ; 数字か？
-12D4-24 36           633 ( 3)         bcc     :false          ; No. C=1で終了
-12D6-20 13           634 ( 3)         bra     :first
-12D8-08              635 ( 1) .next   inx                     ; 符号の次の1文字を取得
-12D9-E6 00           636 ( 4)         ldab    0,x
-12DB-BD FF C1        637 ( 6)         jsr     is_decimal_char ; 数字か？
-12DE-24 40           638 ( 3)         bcc     :err04          ; No. エラー処理へ
-12E0-20 09           639 ( 3)         bra     :first          ; Yes. これが最初の数字
-12E2-DD 9C           640 ( 4) .loop   std     <:RetValue      ; 結果を退避
-12E4-E6 00           641 ( 4)         ldab    0,x             ; 1文字取得
-12E6-BD FF C1        642 ( 6)         jsr     is_decimal_char ; 数字か？
-12E9-24 14           643 ( 3)         bcc     :end
-12EB-C0 30           644 ( 2) .first  subb    #$30            ; アスキーコードを数値にする
-12ED-D7 9F           645 ( 3)         stab    <:TempValue+1
-12EF-                646            ; // RetValue * 10 + TempValue
-12EF-DC 9C           647 ( 4)         ldd     <:RetValue
-12F1-05              648 ( 1)         asld                    ; * 2
-12F2-05              649 ( 1)         asld                    ; * 4
-12F3-D3 9C           650 ( 4)         addd    <:RetValue      ; * 5
-12F5-05              651 ( 1)         asld                    ; * 10
-12F6-D3 9E           652 ( 4)         addd    <:TempValue     ; += TempValue
-12F8-08              653 ( 1)         inx                     ; ポインタを進める
-12F9-25 20           654 ( 3)         bcs     :err02          ; addd <:TempValue でC=1になったら桁が大きすぎ
-12FB-2B 10           655 ( 3)         bmi     :overflow       ; 同じくN=1なら-32,768かどうか判定
-12FD-20 E3           656 ( 3)         bra     :loop
-12FF-DC 9C           657 ( 4) .end    ldd     <:RetValue      ; D <- 結果の数値（Integer）
-1301-7D 00 84        658 ( 4)         tst     <SignFlag       ; 符号チェック
-1304-27 05           659 ( 3)         beq     :true
-1306-43              660 ( 1)         coma                    ; 負なら2の補数に
-1307-53              661 ( 1)         comb
-1308-C3 00 01        662 ( 3)         addd    #1
-130B-0D              663 ( 1) .true   sec
-130C-39              664 ( 5) .false  rts
-130D-                665
-130D-                666      .overflow
-130D-                667            ; // -32,768かどうかの判定
-130D-18              668 ( 2)         xgdx
-130E-8C 80 00        669 ( 3)         cpx     #$8000          ; 数値は$8000 （-32,768）か？
-1311-18              670 ( 2)         xgdx
-1312-26 07           671 ( 3)         bne     :err02          ; No. 範囲外
-1314-7D 00 84        672 ( 4)         tst     <SignFlag       ; 符号チェック
-1317-27 02           673 ( 3)         beq     :err02          ; 正ならば範囲外
-1319-20 C7           674 ( 3)         bra     :loop           ; 負ならば-32,768で範囲内なので元に戻る
-131B-                675
-131B-86 02           676 ( 2) .err02  ldaa    #2              ; "Out of range"
-131D-7E 15 08        677 ( 3)         jmp     write_err_msg
-1320-86 04           678 ( 2) .err04  ldaa    #4              ; "Illegal expression"
-1322-7E 15 08        679 ( 3)         jmp     write_err_msg
-1325-                680
-1325-                681
-1325-                682      ; -----------------------------------------------------------------------
-1325-                683      ; Dレジスタの数値をコンソールに出力する
-1325-                684      ; Write Decimal Character converted from Integer
-1325-                685      ;【引数】D:Integer
-1325-                686      ;【使用】A, B, X
-1325-                687      ;【返値】なし
-1325-                688      ; -----------------------------------------------------------------------
-1325-                689      write_integer:
-009C-                690      .ZeroSuppress   .eq     UR0H    ; ゼロサプレスフラグ
-009D-                691      .Counter        .eq     UR0L    ; 桁カウンター
-1325-2A 0C           692 ( 3)         bpl     :plus           ; 符号判定
-1327-37              693 ( 4)         pshb                    ; 負数なら'-'を出力する
-1328-C6 2D           694 ( 2)         ldab    #'-'
-132A-BD FF AC        695 ( 6)         jsr     write_char
-132D-33              696 ( 3)         pulb
-132E-43              697 ( 1)         coma                    ; 絶対値にする（2の補数にする）
-132F-53              698 ( 1)         comb
-1330-C3 00 01        699 ( 3)         addd    #1
-1333-7F 00 9C        700 ( 5) .plus   clr     <:ZeroSuppress
-1336-CE 13 66        701 ( 3)         ldx     #:CONST
-1339-7F 00 9D        702 ( 5) .loop   clr     <:Counter
-133C-A3 00           703 ( 5) .digit  subd    0,x             ; Dレジスタから桁ごとの数値を引く
-133E-25 05           704 ( 3)         bcs     :write
-1340-7C 00 9D        705 ( 6)         inc     <:Counter       ; 引けた回数をカウントする
-1343-20 F7           706 ( 3)         bra     :digit
-1345-                707
-1345-E3 00           708 ( 5) .write  addd    0,x             ; Dレジスタから引きすぎた分を戻す
-1347-37              709 ( 4)         pshb
-1348-D6 9D           710 ( 3)         ldab    <:Counter
-134A-27 03           711 ( 3)         beq     :1              ; この桁はゼロか？
-134C-7C 00 9C        712 ( 6)         inc     <:ZeroSuppress  ; No. ゼロサプレスフラグをセットする
-134F-7D 00 9C        713 ( 4) .1      tst     <:ZeroSuppress  ; セロサプレスフラグが立っている？
-1352-27 05           714 ( 3)         beq     :2              ; No. この桁は表示しない
-1354-CB 30           715 ( 2)         addb    #$30            ; Yes. この桁を表示する
-1356-BD FF AC        716 ( 6)         jsr     write_char
-1359-33              717 ( 3) .2      pulb
-135A-08              718 ( 1)         inx                     ; 次の引く数へ
-135B-08              719 ( 1)         inx
-135C-8C 13 6E        720 ( 3)         cpx     #:CONST+8
-135F-26 D8           721 ( 3)         bne     :loop
-1361-CB 30           722 ( 2)         addb    #$30            ; 一の桁の数値を表示
-1363-7E FF AC        723 ( 3)         jmp     write_char
-1366-                724      ; Dから引いていく数
-1366-27 10           725      .CONST  .dw     $2710           ; 10,000
-1368-03 E8           726              .dw     $03e8           ; 1,000
-136A-00 64           727              .dw     $0064           ; 100
-136C-00 0A           728              .dw     $000a           ; 10
-136E-                729
-136E-                730
-136E-                731      ; -----------------------------------------------------------------------
-136E-                732      ; テキストバッファの英文字が変数か判定する
-136E-                733      ; Is a character retrieved from a text buffer a variable?
-136E-                734      ;【引数】X:バッファアドレス
-136E-                735      ;【使用】A, B, X
-136E-                736      ;【返値】真(C=1) / B:変数のアスキーコード X:次のバッファアドレス
-136E-                737      ;        偽(C=0) / B:現在の位置のアスキーコード X:現在のバッファアドレス
-136E-                738      ; -----------------------------------------------------------------------
-136E-                739      is_variable:
-136E-E6 00           740 ( 4)         ldab    0,x
-1370-BD FF BE        741 ( 6)         jsr     is_alphabetic_char
-1373-24 0D           742 ( 3)         bcc     :end
-1375-17              743 ( 1)         tba                             ; 1文字目のアスキーコードを退避
-1376-E6 01           744 ( 4)         ldab    1,x                     ; 2文字目を取得
-1378-BD FF BE        745 ( 6)         jsr     is_alphabetic_char      ; 2文字もアルファベットか？
-137B-16              746 ( 1)         tab                             ; 1文字目のアスキーコードを復帰
-137C-24 02           747 ( 3)         bcc     :var                    ; No. 英文字1字なので変数である
-137E-0C              748 ( 1)         clc                             ; Yes. 変数ではない。C=0
-137F-39              749 ( 5)         rts
-1380-08              750 ( 1) .var    inx                             ; ポインタを進める
-1381-0D              751 ( 1)         sec                             ; C=1
-1382-39              752 ( 5) .end    rts
-1383-                753
-1383-                754
-1383-                755      ; -----------------------------------------------------------------------
-1383-                756      ; 空白を読み飛ばす
-1383-                757      ; Skip Space
-1383-                758      ;【引数】X:実行位置アドレス
-1383-                759      ;【使用】B, X
-1383-                760      ;【返値】B:アスキーコード（$00の時Z=1）
-1383-                761      ;        X:実行位置アドレス
-1383-                762      ; -----------------------------------------------------------------------
-1383-                763      skip_space:
-1383-E6 00           764 ( 4)         ldab    0,x
-1385-27 07           765 ( 3)         beq     :end
-1387-C1 20           766 ( 2)         cmpb    #SPACE
-1389-22 03           767 ( 3)         bhi     :end
-138B-08              768 ( 1)         inx
-138C-20 F5           769 ( 3)         bra     skip_space
-138E-39              770 ( 5) .end    rts
-138F-                771
-138F-                772
-138F-                773      ; -----------------------------------------------------------------------
-138F-                774      ; 引用符付きの文字列を出力する
-138F-                775      ; Write Quoted Stirng
-138F-                776      ;【引数】B:アスキーコード X:実行位置アドレス
-138F-                777      ;【使用】A, B, X
-138F-                778      ;【返値】真(C=1) / X:次の実行位置アドレス
-138F-                779      ;        偽：引用符がない(C=0) / X:現在の実行位置アドレス
-138F-                780      ; -----------------------------------------------------------------------
-138F-                781      write_quoted_str:
-138F-C1 22           782 ( 2)         cmpb    #$22            ; 一重引用符か？
-1391-27 04           783 ( 3)         beq     :1
-1393-C1 27           784 ( 2)         cmpb    #$27            ; 二重引用符か？
-1395-26 19           785 ( 3)         bne     :false          ; 引用符がなければC=0にしてリターン
-1397-17              786 ( 1) .1      tba                     ; Aレジスタに引用符の種類を保存しておく
-1398-                787            ; // 終端の引用符をチェック
-1398-3C              788 ( 5)         pshx
-1399-08              789 ( 1) .check  inx
-139A-E6 00           790 ( 4)         ldab    0,x
-139C-27 14           791 ( 3)         beq     :err10          ; 終端文字なら"Print Statement Error"
-139E-11              792 ( 1)         cba
-139F-26 F8           793 ( 3)         bne     :check
-13A1-38              794 ( 4)         pulx
-13A2-                795            ; // 文字列の出力
-13A2-08              796 ( 1) .loop   inx
-13A3-E6 00           797 ( 4)         ldab    0,x
-13A5-11              798 ( 1)         cba                     ; 保存した引用符との比較
-13A6-27 05           799 ( 3)         beq     :true           ; 文字列前後の引用符が一致すれば終了処理
-13A8-BD FF AC        800 ( 6)         jsr     write_char
-13AB-20 F5           801 ( 3)         bra     :loop
-13AD-08              802 ( 1) .true   inx
-13AE-0D              803 ( 1)         sec
-13AF-39              804 ( 5)         rts
-13B0-0C              805 ( 1) .false  clc
-13B1-39              806 ( 5)         rts
-13B2-86 0A           807 ( 2) .err10  ldaa    #10             ; "Print statement error"
-13B4-7E 15 08        808 ( 3)         jmp     write_err_msg
-13B7-                809
-13B7-                810
-13B7-                811      ; -----------------------------------------------------------------------
-13B7-                812      ; タブを出力する
-13B7-                813      ; Write tabs
-13B7-                814      ;【引数】なし
-13B7-                815      ;【使用】B
-13B7-                816      ;【返値】なし
-13B7-                817      ; -----------------------------------------------------------------------
-13B7-                818      write_tab:
-13B7-BD FF B5        819 ( 6) .top    jsr     write_space
-13BA-7B 07 39        820 ( 4)         tim     #7,<TabCount
-13BD-26 F8           821 ( 3)         bne     :top
-13BF-39              822 ( 5)         rts
-13C0-                823
-13C0-                824
-13C0-                825      ; -----------------------------------------------------------------------
-13C0-                826      ; 式を評価して変数に値を代入する
-13C0-                827      ; Evaluate an expression and assign a value to a variable
-13C0-                828      ;【引数】X:実行位置アドレス *VarAddress:変数のアドレス
-13C0-                829      ;【使用】A, B, X（関連ルーチンでUR0, UR1, UR2, UR3）
-13C0-                830      ;【返値】D:Integer X:次の実行位置アドレス
-13C0-                831      ; -----------------------------------------------------------------------
-13C0-                832      assign_to_var:
-13C0-BD 13 83        833 ( 6)         jsr     skip_space
-13C3-BD 10 BD        834 ( 6)         jsr     eval_expression
-13C6-24 07           835 ( 3)         bcc     :err04
-13C8-3C              836 ( 5)         pshx                    ; 実行位置アドレスを退避
-13C9-DE 8B           837 ( 4)         ldx     <VariableAddr
-13CB-ED 00           838 ( 5)         std     0,x             ; 変数に結果を保存
-13CD-38              839 ( 4)         pulx                    ; 実行位置アドレスを復帰
-13CE-39              840 ( 5)         rts
-13CF-86 04           841 ( 2) .err04  ldaa    #4              ; "Illegal expression"
-13D1-7E 15 08        842 ( 3)         jmp     write_err_msg
-13D4-                843
-13D4-                844
-13D4-                845      ; -----------------------------------------------------------------------
-13D4-                846      ; Print文を実行する
-13D4-                847      ; Execute 'print' statement
-13D4-                848      ;【引数】X:実行位置アドレス
-13D4-                849      ;【使用】B, X（下位ルーチンでA）
-13D4-                850      ;【返値】なし
-13D4-                851      ; -----------------------------------------------------------------------
-13D4-                852      exe_print:
-13D4-72 01 8F        853 ( 6)         oim     #1,<NewLineFlag ; 改行フラグを'ON'にする
-13D7-BD 13 83        854 ( 6) .loop   jsr     skip_space
-13DA-27 37           855 ( 3)         beq     :finish         ; 終端文字なら改行して終了
-13DC-BD 13 8F        856 ( 6)         jsr     write_quoted_str ; 引用符があれば文字列を出力する
-13DF-25 1B           857 ( 3)         bcs     :nlon
-13E1-BD 10 BD        858 ( 6)         jsr     eval_expression
-13E4-25 11           859 ( 3)         bcs     :int
-13E6-                860            ; // eval_expressionの返値がC=0だった場合は式が存在したのか確認する
-13E6-                861            ; // 'print'の次の文字がセミコロンとカンマ、コロンであれば式は無かったとする
-13E6-C1 3B           862 ( 2) .check  cmpb    #';'
-13E8-27 23           863 ( 3)         beq     :nloff
-13EA-C1 2C           864 ( 2)         cmpb    #','
-13EC-27 1C           865 ( 3)         beq     :tab
-13EE-C1 3A           866 ( 2)         cmpb    #':'
-13F0-27 21           867 ( 3)         beq     :finish
-13F2-86 04           868 ( 2)         ldaa    #4              ; "Illegal expression"
-13F4-7E 15 08        869 ( 3)         jmp     write_err_msg
-13F7-3C              870 ( 5) .int    pshx                    ; 実行位置アドレスを退避
-13F8-BD 13 25        871 ( 6)         jsr     write_integer   ; 評価した式を出力
-13FB-38              872 ( 4)         pulx                    ; 実行位置アドレスを復帰
-13FC-72 01 8F        873 ( 6) .nlon   oim     #1,<NewLineFlag ; 改行フラグを'ON'にする
-13FF-BD 13 83        874 ( 6)         jsr     skip_space
-1402-C1 3B           875 ( 2)         cmpb    #';'
-1404-27 07           876 ( 3)         beq     :nloff
-1406-C1 2C           877 ( 2)         cmpb    #','
-1408-26 09           878 ( 3)         bne     :finish
-140A-BD 13 B7        879 ( 6) .tab    jsr     write_tab       ; タブ出力
-140D-7F 00 8F        880 ( 5) .nloff  clr     <NewLineFlag    ; 改行フラグを'OFF'にする
-1410-08              881 ( 1)         inx                     ; 次の文字へ
-1411-20 C4           882 ( 3)         bra     :loop
-1413-7D 00 8F        883 ( 4) .finish tst     <NewLineFlag
-1416-27 03           884 ( 3)         beq     :end            ; 改行フラグが'OFF'なら終了
-1418-BD FF B2        885 ( 6)         jsr     write_crlf      ; 改行フラグが'ON'なら改行出力
-141B-7E 10 71        886 ( 3) .end    jmp     is_multi
-141E-                887
-141E-                888
-141E-                889      ; -----------------------------------------------------------------------
-141E-                890      ; input文を実行する
-141E-                891      ; Execute 'input' statement
-141E-                892      ; -----------------------------------------------------------------------
-141E-                893      exe_input:
-141E-BD 13 83        894 ( 6)         jsr     skip_space
-1421-27 31           895 ( 3)         beq     :end            ; 終端文字なら改行して終了
-1423-BD 13 8F        896 ( 6)         jsr     write_quoted_str ; 引用符があれば文字列を出力する
-1426-24 0A           897 ( 3)         bcc     :1
-1428-E6 00           898 ( 4)         ldab    0,x
-142A-C1 3B           899 ( 2)         cmpb    #';'
-142C-26 29           900 ( 3)         bne     :err00
-142E-08              901 ( 1)         inx
-142F-BD 13 83        902 ( 6)         jsr     skip_space
-1432-BD 13 6E        903 ( 6) .1      jsr     is_variable
-1435-24 20           904 ( 3)         bcc     :err00
-1437-86 01           905 ( 2)         ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
-1439-58              906 ( 1)         aslb                    ; B = 変数領域の下位バイト
-143A-DD 8B           907 ( 4)         std     <VariableAddr   ; 変数アドレスを保存
-143C-                908            ; // 変数の後に余計な文字がないか確認
-143C-                909            ; // 例えば "input a+b" など
-143C-DF 8D           910 ( 4)         stx     <ExePointer     ; 実行位置アドレスを退避
-143E-BD 13 83        911 ( 6)         jsr     skip_space
-1441-27 06           912 ( 3)         beq     :read           ; 終端文字なら入力へ
-1443-C1 3A           913 ( 2)         cmpb    #':'            ; ":"なら入力へ
-1445-26 10           914 ( 3)         bne     :err00          ; それ以外の文字ならエラー
-1447-DE 8D           915 ( 4)         ldx     <ExePointer     ; 実行位置アドレスを復帰
-1449-BD FF A9        916 ( 6) .read   jsr     read_line
-144C-CE 01 00        917 ( 3)         ldx     #Rx_BUFFER
-144F-BD 13 C0        918 ( 6)         jsr     assign_to_var   ; 入力された内容を変数に代入
-1452-DE 8D           919 ( 4)         ldx     <ExePointer     ; 実行位置アドレスを復帰
-1454-7E 10 71        920 ( 3) .end    jmp     is_multi
-1457-4F              921 ( 1) .err00  clra                    ; "Syntax error"
-1458-7E 15 08        922 ( 3)         jmp     write_err_msg
-145B-                923
-145B-                924
-145B-                925      ; -----------------------------------------------------------------------
-145B-                926      ; if文を実行する
-145B-                927      ; Execute 'if' statement
-145B-                928      ;【引数】X:実行位置アドレス
-145B-                929      ;【使用】B, X
-145B-                930      ;【返値】なし
-145B-                931      ; -----------------------------------------------------------------------
-145B-BD 13 83        932 ( 6) exe_if: jsr     skip_space      ; 空白を読み飛ばし
-145E-27 0B           933 ( 3)         beq     :end            ; 終端文字なら終了
-1460-BD 10 BD        934 ( 6)         jsr     eval_expression ; 式評価
-1463-24 09           935 ( 3)         bcc     :err04
-1465-5D              936 ( 1)         tstb                    ; 真偽値はゼロか否かなので下位8bitのみで判断
-1466-27 03           937 ( 3)         beq     :end
-1468-7E 10 84        938 ( 3)         jmp     exe_line        ; True
-146B-7E 10 0E        939 ( 3) .end    jmp     tb_main         ; Falseならば全て無視され行末まで進む
-146E-86 04           940 ( 2) .err04  ldaa    #4              ; "Illegal expression"
-1470-7E 15 08        941 ( 3)         jmp     write_err_msg
-1473-                942
-1473-                943
-1473-                944      ; ------------------------------------------------
-1473-                945      ; ブロック転送
-1473-                946      ; Copy memory
-1473-                947      ;【引数】Source:転送元アドレス
-1473-                948      ;        Destination:転送先アドレス
-1473-                949      ;        Bytes:転送バイト数
-1473-                950      ;【使用】A, B, X, R0
-1473-                951      ;【返値】なし
-1473-                952      ; ------------------------------------------------
-1473-                953      mem_copy:
-009C-                954      .Offset .eq     UR0
-1473-DC 94           955 ( 4)         ldd     <Bytes
-1475-27 33           956 ( 3)         beq     :end            ; 転送バイト数が0ならば即終了
-1477-                957            ; // オフセットの計算
-1477-DC 92           958 ( 4)         ldd     <Destination    ; dst - src
-1479-93 90           959 ( 4)         subd    <Source
-147B-DD 9C           960 ( 4)         std     <:Offset        ; offset = dst - src
-147D-                961            ; // 終了判定用のアドレスを計算
-147D-DC 90           962 ( 4)         ldd     <Source
-147F-D3 94           963 ( 4)         addd    <Bytes          ; src + bytes = 転元終了アドレス
-1481-DD 92           964 ( 4)         std     <Destination    ; 転送終了アドレスを代入
-1483-                965            ; // 転送開始
-1483-DE 90           966 ( 4)         ldx     <Source         ; 転送開始アドレスを代入
-1485-                967            ; // 転送するバイト数が奇数か偶数か判断。
-1485-                968            ; // 奇数ならByte転送x1 + Word転送、偶数ならWord転送
-1485-DC 94           969 ( 4)         ldd     <Bytes
-1487-04              970 ( 1)         lsrd                    ; Bytes / 2, 奇数ならC=1
-1488-24 0E           971 ( 3)         bcc     :loop           ; 偶数ならWord転送へ
-148A-                972            ; // Byte転送
-148A-A6 00           973 ( 4)         ldaa    0,x             ; A <- [source]
-148C-18              974 ( 2)         xgdx                    ; D = address, X = data
-148D-D3 9C           975 ( 4)         addd    <:Offset        ; src - offset = dst
-148F-18              976 ( 2)         xgdx                    ; D = data, X = address
-1490-A7 00           977 ( 4)         staa    0,x             ; [dst] <- A
-1492-18              978 ( 2)         xgdx                    ; D = address, X = data
-1493-93 9C           979 ( 4)         subd    <:Offset        ; dst + offset = src
-1495-18              980 ( 2)         xgdx                    ; D = data, X = address
-1496-20 0D           981 ( 3)         bra     :odd
-1498-                982            ; // Word転送
-1498-EC 00           983 ( 5) .loop   ldd     0,x
-149A-18              984 ( 2)         xgdx
-149B-D3 9C           985 ( 4)         addd    <:Offset
-149D-18              986 ( 2)         xgdx
-149E-ED 00           987 ( 5)         std     0,x
-14A0-18              988 ( 2)         xgdx
-14A1-93 9C           989 ( 4)         subd    <:Offset
-14A3-18              990 ( 2)         xgdx
-14A4-08              991 ( 1)         inx
-14A5-08              992 ( 1) .odd    inx
-14A6-9C 92           993 ( 4)         cpx     <Destination    ; 転送終了アドレスと現在のアドレスを比較
-14A8-26 EE           994 ( 3)         bne     :loop
-14AA-39              995 ( 5) .end    rts
-14AB-                996
-14AB-                997
-14AB-                998      ; -----------------------------------------------------------------------
-14AB-                999      ; テーブル検索
-14AB-               1000      ; Search the keyword table
-14AB-               1001      ;【引数】X:テーブルの先頭アドレス, *ExePointer:実行位置アドレス
-14AB-               1002      ;【使用】A, B, X
-14AB-               1003      ;【結果】真(C=1) / 命令文実行. X:次の実行位置アドレス
-14AB-               1004      ;        偽(C=0) / 何もせずにリターン X:引数*ExePointer（実行位置アドレス）
-14AB-               1005      ; -----------------------------------------------------------------------
-14AB-               1006      search_table:
-14AB-EC 05          1007 ( 5) .top    ldd     5,x             ; キーワードの初めの2文字をDレジスタに
-14AD-91 A4          1008 ( 3)         cmpa    <COMPARE        ; 1文字目を比較
-14AF-26 2F          1009 ( 3)         bne     :false
-14B1-D1 A5          1010 ( 3)         cmpb    <COMPARE+1      ; 2文字目を比較
-14B3-26 2B          1011 ( 3)         bne     :false
-14B5-EC 07          1012 ( 5)         ldd     7,x             ; 次の2文字をDレジスタに
-14B7-4D             1013 ( 1)         tsta                    ; $00（終端記号）か？
-14B8-27 1B          1014 ( 3)         beq     :true
-14BA-91 A6          1015 ( 3)         cmpa    <COMPARE+2      ; 3文字目を比較
-14BC-26 22          1016 ( 3)         bne     :false
-14BE-5D             1017 ( 1)         tstb                    ; $00（終端記号）か？
-14BF-27 14          1018 ( 3)         beq     :true
-14C1-D1 A7          1019 ( 3)         cmpb    <COMPARE+3      ; 4文字目を比較
-14C3-26 1B          1020 ( 3)         bne     :false
-14C5-EC 09          1021 ( 5)         ldd     9,x             ; 次の2文字をDレジスタに
-14C7-4D             1022 ( 1)         tsta                    ; $00（終端記号）か？
-14C8-27 0B          1023 ( 3)         beq     :true
-14CA-91 A8          1024 ( 3)         cmpa    <COMPARE+4      ; 5文字目を比較
-14CC-26 12          1025 ( 3)         bne     :false
-14CE-5D             1026 ( 1)         tstb                    ; $00（終端記号）か？
-14CF-27 04          1027 ( 3)         beq     :true
-14D1-D1 A9          1028 ( 3)         cmpb    <COMPARE+5      ; 6文字目を比較
-14D3-26 0B          1029 ( 3)         bne     :false
-14D5-E6 02          1030 ( 4) .true   ldab    2,x             ; B = 語長
-14D7-EE 03          1031 ( 5)         ldx     3,x             ; X = 命令ルーチンのアドレス
-14D9-31             1032 ( 1)         ins                     ; 元のリターンアドレスを削除
-14DA-31             1033 ( 1)         ins
-14DB-3C             1034 ( 5)         pshx                    ; スタックトップにリターンアドレスを積む
-14DC-DE 8D          1035 ( 4)         ldx     <ExePointer
-14DE-3A             1036 ( 1)         abx                     ; 実行位置アドレスを文字数分プラスする
-14DF-39             1037 ( 5)         rts                     ; 命令ルーチンにジャンプ
-14E0-EE 00          1038 ( 5) .false  ldx     0,x             ; リンクポインタを読み込み、次のキーワードに
-14E2-26 C7          1039 ( 3)         bne     :top
-14E4-DE 8D          1040 ( 4)         ldx     <ExePointer     ; マッチしなければ実行位置ポインタを元に戻す
-14E6-0C             1041 ( 1)         clc                     ; false: C=0
-14E7-39             1042 ( 5)         rts
-14E8-               1043
-14E8-               1044
-14E8-               1045      ; ***********************************************************************
-14E8-               1046      ;   キーワードテーブル Keyword table
-14E8-               1047      ; ***********************************************************************
-14E8-               1048      ; レコードの構造 Record structure
-14E8-               1049      ; +--------+--------+--------+--------+--------+------+-~-+------+--------+
-14E8-               1050      ; | リンクポインタ  |  語長  |命令ルーチン位置 |   キーワード    |  終端  |
-14E8-               1051      ; |   Link pointer  | Length |Execution address|     Keyword     |  $00   |
-14E8-               1052      ; +--------+--------+--------+--------+--------+------+-~-+------+--------+
-14E8-               1053      ; キーワードは2文字以上6文字以下
-14E8-               1054      SMT_TABLE:      .eq     *
-14E8-14 F3          1055      .print          .dw     :input
-14EA-05             1056                      .db     5
-14EB-13 D4          1057                      .dw     exe_print
-14ED-70 72 69 6E 
-     74 00          1058                      .az     "print"
-14F3-14 FE          1059      .input          .dw     :if
-14F5-05             1060                      .db     5
-14F6-14 1E          1061                      .dw     exe_input
-14F8-69 6E 70 75 
-     74 00          1062                      .az     "input"
-14FE-15 06          1063      .if             .dw     :bottom
-1500-02             1064                      .db     2
-1501-14 5B          1065                      .dw     exe_if
-1503-69 66 00       1066                      .az     "if"
-1506-00 00          1067      .bottom         .dw     $0000           ; リンクポインタ$0000はテーブルの終端
-1508-               1068
-1508-               1069
-1508-               1070      ; -----------------------------------------------------------------------
-1508-               1071      ; エラーメッセージを表示する
-1508-               1072      ; Write Error Messege
-1508-               1073      ;【引数】A: エラーコード
-1508-               1074      ;【使用】A, B, X
-1508-               1075      ;【返値】なし
-1508-               1076      ; -----------------------------------------------------------------------
-1508-               1077      write_err_msg:
-1508-7D 00 39       1078 ( 4)         tst     <TabCount       ; タブ位置がゼロでなければ改行する
-150B-27 03          1079 ( 3)         beq     :1
-150D-BD FF B2       1080 ( 6)         jsr     write_crlf
-1510-CE 15 29       1081 ( 3) .1      ldx     #ERRMSG
-1513-BD FF AF       1082 ( 6)         jsr     write_line
-1516-16             1083 ( 1)         tab
-1517-CE 15 31       1084 ( 3)         ldx     #ERRCODE
-151A-3A             1085 ( 1)         abx
-151B-EE 00          1086 ( 5)         ldx     0,x
-151D-BD FF AF       1087 ( 6)         jsr     write_line
-1520-BD FF B2       1088 ( 6)         jsr     write_crlf
-1523-DE 80          1089 ( 4)         ldx     <StackPointer
-1525-35             1090 ( 1)         txs
-1526-7E 10 0E       1091 ( 3)         jmp     tb_main
-1529-               1092
-1529-45 52 52 4F 
-     52 3A 20 00    1093      ERRMSG  .az     "ERROR: "
-1531-15 41          1094      ERRCODE .dw     .err00
-1533-15 4E          1095              .dw     .err02
-1535-15 61          1096              .dw     .err04
-1537-15 74          1097              .dw     .err06
-1539-15 8D          1098              .dw     .err08
-153B-15 99          1099              .dw     .err10
-153D-15 AF          1100              .dw     .err12
-153F-15 C3          1101              .dw     .err14
-1541-53 79 6E 74 
+100E-                141
+100E-                142      tb_main:
+100E-72 01 9C        143 ( 6)         oim     #1,<ExeStateFlag ; 実行状態フラグをdirectに設定
+1011-C6 3E           144 ( 2)         ldab    #'>'
+1013-BD FF AC        145 ( 6)         jsr     write_char
+1016-BD FF A9        146 ( 6)         jsr     read_line
+1019-CE 01 00        147 ( 3)         ldx     #Rx_BUFFER      ; 実行位置アドレスをセット
+101C-                148            ; // 行番号判定
+101C-BD 12 C7        149 ( 6)         jsr     get_int_from_decimal
+101F-24 0A           150 ( 3)         bcc     execute_mode    ; 先頭が数値でなければ実行モード
+1021-83 00 00        151 ( 3)         subd    #0
+1024-2E 08           152 ( 3)         bgt     edit_mode       ; 数値が1以上であれば編集モード
+1026-86 0C           153 ( 2) .err12  ldaa    #12             ; "Invalid line number"
+1028-7E 15 3A        154 ( 3)         jmp     write_err_msg
+102B-                155
+102B-                156      execute_mode:
+102B-7E 10 87        157 ( 3)         jmp     exe_line
+102E-                158
+102E-                159      edit_mode:
+102E-DF 8D           160 ( 4)         stx     <ExePointer     ; バッファアドレスを保存（行番号の直後を指している）
+1030-DD 96           161 ( 4)         std     <LineNumber     ; 行番号を保存
+1032-                162            ; // 行の長さを取得
+1032-86 04           163 ( 2)         ldaa    #4              ; 行の長さの初期値（2+1+n+1, n=0）
+1034-E6 00           164 ( 4) .loop   ldab    0,x
+1036-27 04           165 ( 3)         beq     :1
+1038-4C              166 ( 1)         inca                    ; 行の長さを+1
+1039-08              167 ( 1)         inx                     ; バッファアドレスを+1
+103A-20 F8           168 ( 3)         bra     :loop
+103C-97 99           169 ( 3) .1      staa    <LineLength+1   ; 行の長さをLineLengthの下位バイトに保存
+103E-                170            ; // 転送の準備
+103E-DE 9A           171 ( 4)         ldx     <PrgmEndAddr    ; X <- プログラムの最終アドレス
+1040-DC 9A           172 ( 4)         ldd     <PrgmEndAddr
+1042-D3 98           173 ( 4)         addd    <LineLength     ; D <- 行の長さを足した最終アドレス
+1044-18              174 ( 2)         xgdx
+1045-8C 0D FD        175 ( 3)         cpx     #USERAREABTM    ; ユーザーエリアを超えていないかチェック
+1048-18              176 ( 2)         xgdx
+1049-24 24           177 ( 3)         bcc     :err14          ; "Memory size over"
+104B-DD 9A           178 ( 4)         std     <PrgmEndAddr    ; 新しい最終アドレスを設定
+104D-                179            ; // 行番号と行の長さを転送
+104D-DC 96           180 ( 4)         ldd     <LineNumber     ; 行番号を取得
+104F-ED 00           181 ( 5)         std     0,x
+1051-08              182 ( 1)         inx
+1052-08              183 ( 1)         inx
+1053-D6 99           184 ( 3)         ldab    <LineLength+1   ; 行の長さを取得
+1055-E7 00           185 ( 4)         stab    0,x
+1057-                186            ; // mem_copyの引数を設定
+1057-08              187 ( 1)         inx
+1058-DF 92           188 ( 4)         stx     <Destination    ; 転送先アドレス（行の長さの直後）を設定
+105A-4F              189 ( 1)         clra                    ; LineLengthの上位バイトをゼロにする
+105B-C0 03           190 ( 2)         subb    #3              ; LineLengthから行番号・行の長さの3バイト分を引く
+105D-DD 94           191 ( 4)         std     <Bytes          ; 転送バイト数を設定
+105F-DC 8D           192 ( 4)         ldd     <ExePointer     ; 行番号の直後を指しているバッファアドレスを復帰
+1061-DD 90           193 ( 4)         std     <Source         ; 転送元アドレスを設定
+1063-BD 14 9B        194 ( 6)         jsr     mem_copy
+1066-                195            ; // 終端行の挿入
+1066-DE 9A           196 ( 4)         ldx     <PrgmEndAddr
+1068-4F              197 ( 1)         clra
+1069-5F              198 ( 1)         clrb
+106A-ED 00           199 ( 5)         std     0,x             ; プログラムの最終アドレスに$0000を加える
+106C-7E 10 0E        200 ( 3)         jmp     tb_main
+106F-86 0E           201 ( 2) .err14  ldaa    #14              ; "Memory size over"
+1071-7E 15 3A        202 ( 3)         jmp     write_err_msg
+1074-                203
+1074-                204
+1074-                205      ; -----------------------------------------------------------------------
+1074-                206      ; マルチステートメントかどうか判定（is_multiはexe_lineの補助ルーチン）
+1074-                207      ; Is a multi statement mark?
+1074-                208      ;【引数】X:実行位置アドレス
+1074-                209      ;【使用】B, X
+1074-                210      ;【返値】なし
+1074-                211      ; -----------------------------------------------------------------------
+1074-                212      is_multi:
+1074-BD 13 90        213 ( 6)         jsr     skip_space
+1077-27 07           214 ( 3)         beq     :end
+1079-C1 3A           215 ( 2)         cmpb    #':'
+107B-26 06           216 ( 3)         bne     :err00
+107D-08              217 ( 1)         inx
+107E-20 07           218 ( 3)         bra     exe_line
+1080-7E 10 0E        219 ( 3) .end    jmp     tb_main
+1083-4F              220 ( 1) .err00  clra                    ; "Syntax error"
+1084-7E 15 3A        221 ( 3)         jmp     write_err_msg
+1087-                222
+1087-                223
+1087-                224      ; -----------------------------------------------------------------------
+1087-                225      ; 一行実行
+1087-                226      ; Execute one line
+1087-                227      ;【引数】X:実行位置アドレス
+1087-                228      ;【使用】A, B, X
+1087-                229      ;【返値】なし
+1087-                230      ; -----------------------------------------------------------------------
+1087-                231      exe_line:
+1087-BD 13 90        232 ( 6)         jsr     skip_space
+108A-27 37           233 ( 3)         beq     :end            ; 終端文字（$00）ならば終了
+108C-                234            ; // 代入文のチェック
+108C-BD 13 7B        235 ( 6)         jsr     is_variable     ; 変数か？
+108F-24 12           236 ( 3)         bcc     :cmd            ; No. テーブル検索へ
+1091-86 01           237 ( 2)         ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
+1093-58              238 ( 1)         aslb                    ; B = 変数領域の下位バイト
+1094-DD 8B           239 ( 4)         std     <VariableAddr   ; 変数アドレスを保存
+1096-BD 13 90        240 ( 6)         jsr     skip_space      ; Yes. 代入文か？
+1099-C1 3D           241 ( 2)         cmpb    #'='
+109B-26 29           242 ( 3)         bne     :err00          ; No. エラー処理へ
+109D-08              243 ( 1)         inx                     ; Yes. 代入実行
+109E-BD 13 CD        244 ( 6)         jsr     assign_to_var
+10A1-20 D1           245 ( 3)         bra     is_multi
+10A3-EC 00           246 ( 5) .cmd    ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
+10A5-DD A5           247 ( 4)         std     <COMPARE
+10A7-EC 02           248 ( 5)         ldd     2,x
+10A9-DD A7           249 ( 4)         std     <COMPARE+2
+10AB-EC 04           250 ( 5)         ldd     4,x
+10AD-DD A9           251 ( 4)         std     <COMPARE+4
+10AF-DF 8D           252 ( 4)         stx     <ExePointer     ; 実行位置アドレスを退避
+10B1-7D 00 9C        253 ( 4)         tst     ExeStateFlag    ; 実行状態フラグの確認
+10B4-27 05           254 ( 3)         beq     :1              ; 0 = runモードであればSMT_TABLEをセット
+10B6-CE 15 10        255 ( 3)         ldx     #CMD_TABLE      ; 1 = directモードであればCMD_TABLEをセット
+10B9-20 03           256 ( 3)         bra     :2
+10BB-CE 15 1A        257 ( 3) .1      ldx     #SMT_TABLE
+10BE-BD 14 D3        258 ( 6) .2      jsr     search_table    ; テーブル検索実行
+10C1-24 03           259 ( 3)         bcc     :err00
+10C3-7E 10 0E        260 ( 3) .end    jmp     tb_main
+10C6-                261
+10C6-4F              262 ( 1) .err00  clra                    ; Syntax error.
+10C7-7E 15 3A        263 ( 3)         jmp     write_err_msg
+10CA-                264
+10CA-                265
+10CA-                266      ; -----------------------------------------------------------------------
+10CA-                267      ; 式を評価する
+10CA-                268      ; Evaluate the expression
+10CA-                269      ;【引数】B:アスキーコード X:実行位置アドレス
+10CA-                270      ;【使用】A, B, X, UR2, UR3 （下位ルーチンでUR0, UR1）
+10CA-                271      ;【返値】真(C=1) / D:Integer X:次の実行位置アドレス
+10CA-                272      ;        偽(C=0) / X:現在の実行位置アドレス
+10CA-                273      ; -----------------------------------------------------------------------
+10CA-                274      eval_expression:
+00A1-                275      .SP     .eq     UR2
+00A3-                276      .X      .eq     UR3
+10CA-                277            ; // エラー時SPとXを元に戻すために初期値をUR2とUR3に退避しておく
+10CA-DF A3           278 ( 4)         stx     <:X
+10CC-30              279 ( 1)         tsx
+10CD-DF A1           280 ( 4)         stx     <:SP
+10CF-DE A3           281 ( 4)         ldx     <:X
+10D1-                282            ; // 計算スタックの初期化
+10D1-CC 01 72        283 ( 3)         ldd     #CSTACK+40+1    ; 40byte分
+10D4-DD 82           284 ( 4)         std     <CStackPtr
+10D6-                285            ; // 式評価開始
+10D6-8D 08           286 ( 5)         bsr     expr_4th
+10D8-                287            ; // 計算結果をスタックトップから取り出す
+10D8-3C              288 ( 5)         pshx
+10D9-DE 82           289 ( 4)         ldx     <CStackPtr
+10DB-EC 00           290 ( 5)         ldd     0,x
+10DD-38              291 ( 4)         pulx
+10DE-0D              292 ( 1)         sec                     ; true:C=1
+10DF-39              293 ( 5)         rts
+10E0-                294
+10E0-                295      expr_4th:
+10E0-8D 50           296 ( 5)         bsr     expr_3rd
+10E2-BD 13 90        297 ( 6) .loop   jsr     skip_space
+10E5-C1 3D           298 ( 2)         cmpb    #'='            ; '='?
+10E7-26 08           299 ( 3)         bne     :ltsign         ; NO. '<'記号のチェックへ
+10E9-08              300 ( 1)         inx
+10EA-8D 46           301 ( 5)         bsr     expr_3rd
+10EC-BD 12 7A        302 ( 6)         jsr     CS_eq           ; EQual to
+10EF-20 F1           303 ( 3)         bra     :loop
+10F1-C1 3C           304 ( 2) .ltsign cmpb    #'<'            ; '<'?
+10F3-26 22           305 ( 3)         bne     :gtsign         ; NO. '>'記号のチェックへ
+10F5-08              306 ( 1)         inx
+10F6-E6 00           307 ( 4)         ldab    0,x
+10F8-C1 3E           308 ( 2)         cmpb    #'>'            ; '<>'?
+10FA-26 08           309 ( 3)         bne     :lte
+10FC-08              310 ( 1)         inx
+10FD-8D 33           311 ( 5)         bsr     expr_3rd
+10FF-BD 12 9B        312 ( 6)         jsr     CS_ne           ; Not Equal to
+1102-20 DE           313 ( 3)         bra     :loop
+1104-C1 3D           314 ( 2) .lte    cmpb    #'='            ; '<='?
+1106-26 08           315 ( 3)         bne     :lt
+1108-08              316 ( 1)         inx
+1109-8D 27           317 ( 5)         bsr     expr_3rd
+110B-BD 12 90        318 ( 6)         jsr     CS_lte          ; Less Than or Equal to
+110E-20 D2           319 ( 3)         bra     :loop
+1110-8D 20           320 ( 5) .lt     bsr     expr_3rd
+1112-BD 12 85        321 ( 6)         jsr     CS_lt           ; Less Than
+1115-20 CB           322 ( 3)         bra     :loop
+1117-C1 3E           323 ( 2) .gtsign cmpb    #'>'            ; '>'?
+1119-26 16           324 ( 3)         bne     :end
+111B-08              325 ( 1)         inx
+111C-E6 00           326 ( 4)         ldab    0,x
+111E-C1 3D           327 ( 2)         cmpb    #'='            ; '>='?
+1120-26 08           328 ( 3)         bne     :gt
+1122-08              329 ( 1)         inx
+1123-8D 0D           330 ( 5)         bsr     expr_3rd
+1125-BD 12 B1        331 ( 6)         jsr     CS_gte          ; Greater Than or Equal to
+1128-20 B8           332 ( 3)         bra     :loop
+112A-8D 06           333 ( 5) .gt     bsr     expr_3rd
+112C-BD 12 A6        334 ( 6)         jsr     CS_gt           ; Greater Than
+112F-20 B1           335 ( 3)         bra     :loop
+1131-39              336 ( 5) .end    rts
+1132-                337
+1132-                338      expr_3rd:
+1132-8D 1C           339 ( 5)         bsr     expr_2nd
+1134-BD 13 90        340 ( 6) .loop   jsr     skip_space
+1137-C1 2B           341 ( 2)         cmpb    #'+'
+1139-26 08           342 ( 3)         bne     :minus
+113B-08              343 ( 1)         inx
+113C-8D 12           344 ( 5)         bsr     expr_2nd
+113E-BD 11 C5        345 ( 6)         jsr     CS_add
+1141-20 F1           346 ( 3)         bra     :loop
+1143-C1 2D           347 ( 2) .minus  cmpb    #'-'
+1145-26 08           348 ( 3)         bne     :end
+1147-08              349 ( 1)         inx
+1148-8D 06           350 ( 5)         bsr     expr_2nd
+114A-BD 11 CE        351 ( 6)         jsr     CS_sub
+114D-20 E5           352 ( 3)         bra     :loop
+114F-39              353 ( 5) .end    rts
+1150-                354
+1150-                355      expr_2nd:
+1150-8D 28           356 ( 5)         bsr     expr_1st
+1152-BD 13 90        357 ( 6) .loop   jsr     skip_space
+1155-C1 2A           358 ( 2)         cmpb    #'*'
+1157-26 08           359 ( 3)         bne     :div
+1159-08              360 ( 1)         inx
+115A-8D 1E           361 ( 5)         bsr     expr_1st
+115C-BD 11 D7        362 ( 6)         jsr     CS_mul
+115F-20 F1           363 ( 3)         bra     :loop
+1161-C1 2F           364 ( 2) .div    cmpb    #'/'
+1163-26 08           365 ( 3)         bne     :mod
+1165-08              366 ( 1)         inx
+1166-8D 12           367 ( 5)         bsr     expr_1st
+1168-BD 11 F4        368 ( 6)         jsr     CS_div
+116B-20 E5           369 ( 3)         bra     :loop
+116D-C1 25           370 ( 2) .mod    cmpb    #'%'
+116F-26 08           371 ( 3)         bne     :end
+1171-08              372 ( 1)         inx
+1172-8D 06           373 ( 5)         bsr     expr_1st
+1174-BD 12 10        374 ( 6)         jsr     CS_mod
+1177-20 D9           375 ( 3)         bra     :loop
+1179-39              376 ( 5) .end    rts
+117A-                377
+117A-                378      expr_1st:
+00A1-                379      .SP     .eq     UR2
+00A3-                380      .X      .eq     UR3
+117A-BD 13 90        381 ( 6)         jsr     skip_space
+117D-BD 12 C7        382 ( 6)         jsr     get_int_from_decimal ; 数字チェックと取得
+1180-24 02           383 ( 3)         bcc     :var            ; 数字でなければ変数のチェックへ
+1182-20 1D           384 ( 3)         bra     :push           ; 数字であればスタックにプッシュ
+1184-BD 13 7B        385 ( 6) .var    jsr     is_variable     ; 変数か？
+1187-24 0A           386 ( 3)         bcc     :paren          ; 変数でなければカッコのチェックへ
+1189-                387            ; // 変数値の取得
+1189-3C              388 ( 5)         pshx                    ; 実行位置アドレスを退避
+118A-86 01           389 ( 2)         ldaa    #VARIABLE>>8    ; A = 変数領域の上位バイト
+118C-58              390 ( 1)         aslb                    ; B = 変数領域の下位バイト
+118D-18              391 ( 2)         xgdx                    ; X = 変数のアドレス
+118E-EC 00           392 ( 5)         ldd     0,x             ; D <- 変数の値
+1190-38              393 ( 4)         pulx                    ; 実行位置アドレスを復帰
+1191-20 0E           394 ( 3)         bra     :push           ; 変数の値をスタックにプッシュ
+1193-C1 28           395 ( 2) .paren  cmpb    #'('
+1195-26 1A           396 ( 3)         bne     :err
+1197-08              397 ( 1)         inx
+1198-BD 10 E0        398 ( 6)         jsr     expr_4th
+119B-C1 29           399 ( 2)         cmpb    #')'
+119D-26 12           400 ( 3)         bne     :err
+119F-08              401 ( 1)         inx
+11A0-39              402 ( 5)         rts
+11A1-3C              403 ( 5) .push   pshx                    ; 実行位置アドレスを退避
+11A2-DE 82           404 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+11A4-09              405 ( 1)         dex
+11A5-09              406 ( 1)         dex
+11A6-8C 01 47        407 ( 3)         cpx     #CSTACK-2       ; スタックオーバーフローのチェック
+11A9-25 0D           408 ( 3)         bcs     :err06
+11AB-ED 00           409 ( 5)         std     0,x
+11AD-DF 82           410 ( 4)         stx     <CStackPtr
+11AF-38              411 ( 4)         pulx                    ; 実行位置アドレスを復帰
+11B0-39              412 ( 5)         rts
+11B1-                413            ; // 戻り先をeval_expressionの呼び出し元に戻してリターン
+11B1-DE A1           414 ( 4) .err    ldx     <:SP
+11B3-35              415 ( 1)         txs
+11B4-DE A3           416 ( 4)         ldx     <:X
+11B6-0C              417 ( 1)         clc                     ; false:C=0
+11B7-39              418 ( 5)         rts
+11B8-86 06           419 ( 2) .err06  ldaa    #6              ; "Calculate stack overflow"
+11BA-7E 15 3A        420 ( 3)         jmp     write_err_msg
+11BD-                421
+11BD-                422      ;
+11BD-                423      ; Arithmetic operator
+11BD-                424      ;
+11BD-                425      CS_store:
+11BD-08              426 ( 1)         inx
+11BE-08              427 ( 1)         inx
+11BF-ED 00           428 ( 5)         std     0,x
+11C1-DF 82           429 ( 4)         stx     <CStackPtr      ; 計算スタックポインタを保存
+11C3-38              430 ( 4)         pulx                    ; 実行位置アドレスを復帰
+11C4-39              431 ( 5)         rts
+11C5-                432
+11C5-3C              433 ( 5) CS_add: pshx                    ; 実行位置アドレスを退避
+11C6-DE 82           434 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+11C8-EC 02           435 ( 5)         ldd     2,x
+11CA-E3 00           436 ( 5)         addd    0,x
+11CC-20 EF           437 ( 3)         bra     CS_store
+11CE-                438
+11CE-3C              439 ( 5) CS_sub: pshx                    ; 実行位置アドレスを退避
+11CF-DE 82           440 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+11D1-EC 02           441 ( 5)         ldd     2,x
+11D3-A3 00           442 ( 5)         subd    0,x
+11D5-20 E6           443 ( 3)         bra     CS_store
+11D7-                444
+11D7-                445      CS_mul:
+009D-                446      .Result         .eq     UR0
+11D7-3C              447 ( 5)         pshx                    ; 実行位置アドレスを退避
+11D8-DE 82           448 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+11DA-                449              ; B * D
+11DA-A6 03           450 ( 4)         ldaa    3,x             ;「B」をAレジスタに代入
+11DC-E6 01           451 ( 4)         ldab    1,x             ;「D」をBレジスタに代入
+11DE-3D              452 ( 7)         mul                     ; B * D
+11DF-DD 9D           453 ( 4)         std     <:Result        ;「B*D」を保存
+11E1-                454              ; A * D
+11E1-EC 01           455 ( 5)         ldd     1,x             ;「D」をAレジスタに、「A」をBレジスタに同時に代入
+11E3-3D              456 ( 7)         mul                     ; A * D
+11E4-DB 9D           457 ( 3)         addb    <:Result        ;「A*D」の下位8bitをResultの上位8bitに加算
+11E6-D7 9D           458 ( 3)         stab    <:Result        ; Resultの上位8bitを保存
+11E8-                459              ; C * B
+11E8-A6 00           460 ( 4)         ldaa    0,x             ;「C」をAレジスタに代入
+11EA-E6 03           461 ( 4)         ldab    3,x             ;「B」をBレジスタに代入
+11EC-3D              462 ( 7)         mul                     ; C * B
+11ED-DB 9D           463 ( 3)         addb    <:Result        ;「C*B」の下位8bitをResultの上位8bitに加算
+11EF-17              464 ( 1)         tba                     ; Resultの上位8bitをAレジスタに転送
+11F0-D6 9E           465 ( 3)         ldab    <:Result+1      ; Resultの下位8bitをBレジスタに転送
+11F2-20 C9           466 ( 3)         bra     CS_store
+11F4-                467
+11F4-                468      ;
+11F4-                469      ; 符号付き割り算の考え方
+11F4-                470      ; ・剰余は除数の符号と同一
+11F4-                471      ;   ・ 7 / 3  = 商  2、剰余  1
+11F4-                472      ;   ・-7 / 3  = 商 -3、剰余  2
+11F4-                473      ;   ・ 7 / -3 = 商 -3、剰余 -2
+11F4-                474      ;   ・-7 / -3 = 商  2、剰余 -1
+11F4-                475      ;  商 ：1.被除数の符号と序数の符号が一致していないときには1足して符号反転する
+11F4-                476      ;       2.ただし、除数がゼロの場合は1は足さない
+11F4-                477      ; 剰余：1.被除数の符号と序数の符号が一致していないときには
+11F4-                478      ;         除数の絶対値から剰余の絶対値を引く
+11F4-                479      ;       2.その結果を除数と同じ符号にする
+11F4-                480      ;       3.ただし、除数がゼロの場合は剰余もゼロ
+11F4-                481      ;
+11F4-3C              482 ( 5) CS_div: pshx                    ; 実行位置アドレスを退避
+11F5-DE 82           483 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+11F7-8D 37           484 ( 5)         bsr     div_uint        ; 除算実行
+11F9-18              485 ( 2)         xgdx                    ; D <- 商（Quotient） X <- 剰余（Remainder）
+11FA-7D 00 85        486 ( 4)         tst     <QuoSignFlag    ; 商の符号チェック
+11FD-27 0D           487 ( 3)         beq     :end            ; '+'なら終了
+11FF-8C 00 00        488 ( 3)         cpx     #0              ; 剰余はゼロか？
+1202-27 03           489 ( 3)         beq     :sign
+1204-C3 00 01        490 ( 3)         addd    #1              ; ゼロでなければ商に1を足す
+1207-43              491 ( 1) .sign   coma                    ; Dレジスタの値を2の補数にする
+1208-53              492 ( 1)         comb
+1209-C3 00 01        493 ( 3)         addd    #1
+120C-DE 82           494 ( 4) .end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
+120E-20 AD           495 ( 3)         bra     CS_store
+1210-                496
+1210-3C              497 ( 5) CS_mod: pshx                    ; 実行位置アドレスを退避
+1211-DE 82           498 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+1213-8D 1B           499 ( 5)         bsr     div_uint        ; 除算実行。D = 剰余
+1215-DD 89           500 ( 4)         std     <Remainder      ; 剰余はゼロか？
+1217-27 13           501 ( 3)         beq     :end            ; ゼロであれば終了
+1219-7D 00 85        502 ( 4)         tst     <QuoSignFlag    ; 被除数・除数の符号一致チェック
+121C-27 04           503 ( 3)         beq     :sign           ; 0なら一致しているので剰余の符号チェック
+121E-DC 87           504 ( 4)         ldd     <Divisor        ; 1なら一致していないので除数 - 剰余
+1220-93 89           505 ( 4)         subd    <Remainder
+1222-7D 00 86        506 ( 4) .sign   tst     <RemSignFlag    ; 剰余の符号チェック
+1225-27 05           507 ( 3)         beq     :end            ; '+'なら終了
+1227-43              508 ( 1)         coma                    ; '-'なら2の補数にする
+1228-53              509 ( 1)         comb
+1229-C3 00 01        510 ( 3)         addd    #1
+122C-DE 82           511 ( 4) .end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
+122E-20 8D           512 ( 3)         bra     CS_store
+1230-                513
+1230-                514      div_uint:
+009D-                515      .Counter        .eq     UR0H
+1230-EC 00           516 ( 5)         ldd     0,x             ; ゼロ除算チェック
+1232-27 41           517 ( 3)         beq     :err08          ; 除数がゼロならエラー
+1234-5F              518 ( 1)         clrb
+1235-D7 85           519 ( 3)         stab    <QuoSignFlag    ; 商の符号フラグを初期化
+1237-D7 86           520 ( 3)         stab    <RemSignFlag    ; 剰余の符号フラグを初期化
+1239-C6 10           521 ( 2)         ldab    #16             ; ループカウンターをセット（16bit分）
+123B-D7 9D           522 ( 3)         stab    <:Counter
+123D-                523              ; // 剰余の符号フラグの設定
+123D-EC 00           524 ( 5)         ldd     0,x             ; Dレジスタに除数を代入
+123F-2A 03           525 ( 3)         bpl     :1              ; 除数が正であれば剰余の符号は正（0）
+1241-7C 00 86        526 ( 6)         inc     <RemSignFlag    ; 除数が負であれば剰余の符号は負（1）
+1244-                527              ; // 商の符号フラグの設定
+1244-A8 02           528 ( 4) .1      eora    2,x             ; 被除数の符号と除数の符号のXORを取る
+1246-2A 03           529 ( 3)         bpl     :2              ; 被除数と除数の符号が同じなら商の符号は正（0）
+1248-7C 00 85        530 ( 6)         inc     <QuoSignFlag    ; 被除数と除数の符号が違えば商の符号は負（1）
+124B-                531              ; // 除数を絶対値にする
+124B-EC 00           532 ( 5) .2      ldd     0,x             ; D <- 除数
+124D-2A 05           533 ( 3)         bpl     :3
+124F-43              534 ( 1)         coma                    ; 除数が負なら絶対値にする
+1250-53              535 ( 1)         comb
+1251-C3 00 01        536 ( 3)         addd    #1
+1254-DD 87           537 ( 4) .3      std     <Divisor        ; 除数を保存
+1256-                538              ; // 非除数を絶対値にする
+1256-EC 02           539 ( 5)         ldd     2,x             ; D <- 被除数
+1258-2A 05           540 ( 3)         bpl     :4
+125A-43              541 ( 1)         coma                    ; 被除数が負なら絶対値にする
+125B-53              542 ( 1)         comb
+125C-C3 00 01        543 ( 3)         addd    #1
+125F-                544              ; // 除算実行
+125F-18              545 ( 2) .4      xgdx                    ; X <- 被除数
+1260-4F              546 ( 1)         clra                    ; D（WORK）をクリア
+1261-5F              547 ( 1)         clrb
+1262-18              548 ( 2) .loop   xgdx                    ; X（被除数）を左シフト
+1263-05              549 ( 1)         asld
+1264-18              550 ( 2)         xgdx
+1265-59              551 ( 1)         rolb                    ; 被除数のMSBをWORKのLSBに代入
+1266-49              552 ( 1)         rola
+1267-93 87           553 ( 4)         subd    <Divisor        ; WORK - 除数
+1269-08              554 ( 1)         inx                     ; XレジスタのLSBを1にセットしておく
+126A-24 03           555 ( 3)         bcc     :5              ; WORKから除数を引けた？
+126C-D3 87           556 ( 4)         addd    <Divisor        ; 引けなければ除数を足して...
+126E-09              557 ( 1)         dex                     ; XレジスタのLSBを0に戻す
+126F-7A 00 9D        558 ( 6) .5      dec     <:Counter       ; ループカウンターを1引く
+1272-26 EE           559 ( 3)         bne     :loop
+1274-39              560 ( 5)         rts
+1275-86 08           561 ( 2) .err08  ldaa    #8              ; "Zero Divide"
+1277-7E 15 3A        562 ( 3)         jmp     write_err_msg
+127A-                563
+127A-3C              564 ( 5) CS_eq:  pshx                    ; 実行位置アドレスを退避
+127B-DE 82           565 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+127D-EC 02           566 ( 5)         ldd     2,x
+127F-A3 00           567 ( 5)         subd    0,x
+1281-27 39           568 ( 3)         beq     CS_true
+1283-20 3D           569 ( 3)         bra     CS_false
+1285-                570
+1285-3C              571 ( 5) CS_lt:  pshx                    ; 実行位置アドレスを退避
+1286-DE 82           572 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+1288-EC 02           573 ( 5)         ldd     2,x
+128A-A3 00           574 ( 5)         subd    0,x
+128C-2D 2E           575 ( 3)         blt     CS_true
+128E-20 32           576 ( 3)         bra     CS_false
+1290-                577
+1290-3C              578 ( 5) CS_lte: pshx                    ; 実行位置アドレスを退避
+1291-DE 82           579 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+1293-EC 02           580 ( 5)         ldd     2,x
+1295-A3 00           581 ( 5)         subd    0,x
+1297-2F 23           582 ( 3)         ble     CS_true
+1299-20 27           583 ( 3)         bra     CS_false
+129B-                584
+129B-3C              585 ( 5) CS_ne:  pshx                    ; 実行位置アドレスを退避
+129C-DE 82           586 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+129E-EC 02           587 ( 5)         ldd     2,x
+12A0-A3 00           588 ( 5)         subd    0,x
+12A2-26 18           589 ( 3)         bne     CS_true
+12A4-20 1C           590 ( 3)         bra     CS_false
+12A6-                591
+12A6-3C              592 ( 5) CS_gt:  pshx                    ; 実行位置アドレスを退避
+12A7-DE 82           593 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+12A9-EC 02           594 ( 5)         ldd     2,x
+12AB-A3 00           595 ( 5)         subd    0,x
+12AD-2E 0D           596 ( 3)         bgt     CS_true
+12AF-20 11           597 ( 3)         bra     CS_false
+12B1-                598
+12B1-3C              599 ( 5) CS_gte: pshx                    ; 実行位置アドレスを退避
+12B2-DE 82           600 ( 4)         ldx     <CStackPtr      ; X <- 計算スタックポインタ
+12B4-EC 02           601 ( 5)         ldd     2,x
+12B6-A3 00           602 ( 5)         subd    0,x
+12B8-2C 02           603 ( 3)         bge     CS_true
+12BA-20 06           604 ( 3)         bra     CS_false
+12BC-                605
+12BC-                606      CS_true:
+12BC-CC 00 01        607 ( 3)         ldd     #1
+12BF-7E 11 BD        608 ( 3)         jmp     CS_store
+12C2-                609
+12C2-                610      CS_false:
+12C2-4F              611 ( 1)         clra
+12C3-5F              612 ( 1)         clrb
+12C4-7E 11 BD        613 ( 3)         jmp     CS_store
+12C7-                614
+12C7-                615      ; -----------------------------------------------------------------------
+12C7-                616      ; テキストバッファの10進文字列から数値を取得する
+12C7-                617      ; Get a integer from a decimal string in a text buffer
+12C7-                618      ;【引数】X:バッファアドレス
+12C7-                619      ;【使用】A, B, X, UR0, UR1
+12C7-                620      ;【返値】真(C=1) / D:Integer X:次のバッファアドレス
+12C7-                621      ;        偽(C=0) / B:現在の位置のアスキーコード X:現在のバッファアドレス
+12C7-                622      ; -----------------------------------------------------------------------
+12C7-                623      get_int_from_decimal:
+009D-                624      .RetValue       .eq     UR0     ; Return Value
+009F-                625      .TempValue      .eq     UR1     ; Temporary Value
+12C7-4F              626 ( 1)         clra
+12C8-5F              627 ( 1)         clrb
+12C9-DD 9D           628 ( 4)         std     <:RetValue
+12CB-97 9F           629 ( 3)         staa    <:TempValue
+12CD-97 84           630 ( 3)         staa    <SignFlag
+12CF-E6 00           631 ( 4)         ldab    0,x             ; 1文字取得
+12D1-C1 2D           632 ( 2)         cmpb    #'-'            ; マイナス記号か？
+12D3-26 05           633 ( 3)         bne     :1
+12D5-7C 00 84        634 ( 6)         inc     <SignFlag       ; Yes. 符号フラグをセット
+12D8-20 0B           635 ( 3)         bra     :next
+12DA-C1 2B           636 ( 2) .1      cmpb    #'+'            ; プラス記号か？
+12DC-27 07           637 ( 3)         beq     :next
+12DE-BD FF C1        638 ( 6)         jsr     is_decimal_char ; 数字か？
+12E1-24 36           639 ( 3)         bcc     :false          ; No. C=1で終了
+12E3-20 13           640 ( 3)         bra     :first
+12E5-08              641 ( 1) .next   inx                     ; 符号の次の1文字を取得
+12E6-E6 00           642 ( 4)         ldab    0,x
+12E8-BD FF C1        643 ( 6)         jsr     is_decimal_char ; 数字か？
+12EB-24 40           644 ( 3)         bcc     :err04          ; No. エラー処理へ
+12ED-20 09           645 ( 3)         bra     :first          ; Yes. これが最初の数字
+12EF-DD 9D           646 ( 4) .loop   std     <:RetValue      ; 結果を退避
+12F1-E6 00           647 ( 4)         ldab    0,x             ; 1文字取得
+12F3-BD FF C1        648 ( 6)         jsr     is_decimal_char ; 数字か？
+12F6-24 14           649 ( 3)         bcc     :end
+12F8-C0 30           650 ( 2) .first  subb    #$30            ; アスキーコードを数値にする
+12FA-D7 A0           651 ( 3)         stab    <:TempValue+1
+12FC-                652            ; // RetValue * 10 + TempValue
+12FC-DC 9D           653 ( 4)         ldd     <:RetValue
+12FE-05              654 ( 1)         asld                    ; * 2
+12FF-05              655 ( 1)         asld                    ; * 4
+1300-D3 9D           656 ( 4)         addd    <:RetValue      ; * 5
+1302-05              657 ( 1)         asld                    ; * 10
+1303-D3 9F           658 ( 4)         addd    <:TempValue     ; += TempValue
+1305-08              659 ( 1)         inx                     ; ポインタを進める
+1306-25 20           660 ( 3)         bcs     :err02          ; addd <:TempValue でC=1になったら桁が大きすぎ
+1308-2B 10           661 ( 3)         bmi     :overflow       ; 同じくN=1なら-32,768かどうか判定
+130A-20 E3           662 ( 3)         bra     :loop
+130C-DC 9D           663 ( 4) .end    ldd     <:RetValue      ; D <- 結果の数値（Integer）
+130E-7D 00 84        664 ( 4)         tst     <SignFlag       ; 符号チェック
+1311-27 05           665 ( 3)         beq     :true
+1313-43              666 ( 1)         coma                    ; 負なら2の補数に
+1314-53              667 ( 1)         comb
+1315-C3 00 01        668 ( 3)         addd    #1
+1318-0D              669 ( 1) .true   sec
+1319-39              670 ( 5) .false  rts
+131A-                671
+131A-                672      .overflow
+131A-                673            ; // -32,768かどうかの判定
+131A-18              674 ( 2)         xgdx
+131B-8C 80 00        675 ( 3)         cpx     #$8000          ; 数値は$8000 （-32,768）か？
+131E-18              676 ( 2)         xgdx
+131F-26 07           677 ( 3)         bne     :err02          ; No. 範囲外
+1321-7D 00 84        678 ( 4)         tst     <SignFlag       ; 符号チェック
+1324-27 02           679 ( 3)         beq     :err02          ; 正ならば範囲外
+1326-20 C7           680 ( 3)         bra     :loop           ; 負ならば-32,768で範囲内なので元に戻る
+1328-                681
+1328-86 02           682 ( 2) .err02  ldaa    #2              ; "Out of range"
+132A-7E 15 3A        683 ( 3)         jmp     write_err_msg
+132D-86 04           684 ( 2) .err04  ldaa    #4              ; "Illegal expression"
+132F-7E 15 3A        685 ( 3)         jmp     write_err_msg
+1332-                686
+1332-                687
+1332-                688      ; -----------------------------------------------------------------------
+1332-                689      ; Dレジスタの数値をコンソールに出力する
+1332-                690      ; Write Decimal Character converted from Integer
+1332-                691      ;【引数】D:Integer
+1332-                692      ;【使用】A, B, X
+1332-                693      ;【返値】なし
+1332-                694      ; -----------------------------------------------------------------------
+1332-                695      write_integer:
+009D-                696      .ZeroSuppress   .eq     UR0H    ; ゼロサプレスフラグ
+009E-                697      .Counter        .eq     UR0L    ; 桁カウンター
+1332-2A 0C           698 ( 3)         bpl     :plus           ; 符号判定
+1334-37              699 ( 4)         pshb                    ; 負数なら'-'を出力する
+1335-C6 2D           700 ( 2)         ldab    #'-'
+1337-BD FF AC        701 ( 6)         jsr     write_char
+133A-33              702 ( 3)         pulb
+133B-43              703 ( 1)         coma                    ; 絶対値にする（2の補数にする）
+133C-53              704 ( 1)         comb
+133D-C3 00 01        705 ( 3)         addd    #1
+1340-7F 00 9D        706 ( 5) .plus   clr     <:ZeroSuppress
+1343-CE 13 73        707 ( 3)         ldx     #:CONST
+1346-7F 00 9E        708 ( 5) .loop   clr     <:Counter
+1349-A3 00           709 ( 5) .digit  subd    0,x             ; Dレジスタから桁ごとの数値を引く
+134B-25 05           710 ( 3)         bcs     :write
+134D-7C 00 9E        711 ( 6)         inc     <:Counter       ; 引けた回数をカウントする
+1350-20 F7           712 ( 3)         bra     :digit
+1352-                713
+1352-E3 00           714 ( 5) .write  addd    0,x             ; Dレジスタから引きすぎた分を戻す
+1354-37              715 ( 4)         pshb
+1355-D6 9E           716 ( 3)         ldab    <:Counter
+1357-27 03           717 ( 3)         beq     :1              ; この桁はゼロか？
+1359-7C 00 9D        718 ( 6)         inc     <:ZeroSuppress  ; No. ゼロサプレスフラグをセットする
+135C-7D 00 9D        719 ( 4) .1      tst     <:ZeroSuppress  ; セロサプレスフラグが立っている？
+135F-27 05           720 ( 3)         beq     :2              ; No. この桁は表示しない
+1361-CB 30           721 ( 2)         addb    #$30            ; Yes. この桁を表示する
+1363-BD FF AC        722 ( 6)         jsr     write_char
+1366-33              723 ( 3) .2      pulb
+1367-08              724 ( 1)         inx                     ; 次の引く数へ
+1368-08              725 ( 1)         inx
+1369-8C 13 7B        726 ( 3)         cpx     #:CONST+8
+136C-26 D8           727 ( 3)         bne     :loop
+136E-CB 30           728 ( 2)         addb    #$30            ; 一の桁の数値を表示
+1370-7E FF AC        729 ( 3)         jmp     write_char
+1373-                730      ; Dから引いていく数
+1373-27 10           731      .CONST  .dw     $2710           ; 10,000
+1375-03 E8           732              .dw     $03e8           ; 1,000
+1377-00 64           733              .dw     $0064           ; 100
+1379-00 0A           734              .dw     $000a           ; 10
+137B-                735
+137B-                736
+137B-                737      ; -----------------------------------------------------------------------
+137B-                738      ; テキストバッファの英文字が変数か判定する
+137B-                739      ; Is a character retrieved from a text buffer a variable?
+137B-                740      ;【引数】X:バッファアドレス
+137B-                741      ;【使用】A, B, X
+137B-                742      ;【返値】真(C=1) / B:変数のアスキーコード X:次のバッファアドレス
+137B-                743      ;        偽(C=0) / B:現在の位置のアスキーコード X:現在のバッファアドレス
+137B-                744      ; -----------------------------------------------------------------------
+137B-                745      is_variable:
+137B-E6 00           746 ( 4)         ldab    0,x
+137D-BD FF BE        747 ( 6)         jsr     is_alphabetic_char
+1380-24 0D           748 ( 3)         bcc     :end
+1382-17              749 ( 1)         tba                             ; 1文字目のアスキーコードを退避
+1383-E6 01           750 ( 4)         ldab    1,x                     ; 2文字目を取得
+1385-BD FF BE        751 ( 6)         jsr     is_alphabetic_char      ; 2文字もアルファベットか？
+1388-16              752 ( 1)         tab                             ; 1文字目のアスキーコードを復帰
+1389-24 02           753 ( 3)         bcc     :var                    ; No. 英文字1字なので変数である
+138B-0C              754 ( 1)         clc                             ; Yes. 変数ではない。C=0
+138C-39              755 ( 5)         rts
+138D-08              756 ( 1) .var    inx                             ; ポインタを進める
+138E-0D              757 ( 1)         sec                             ; C=1
+138F-39              758 ( 5) .end    rts
+1390-                759
+1390-                760
+1390-                761      ; -----------------------------------------------------------------------
+1390-                762      ; 空白を読み飛ばす
+1390-                763      ; Skip Space
+1390-                764      ;【引数】X:実行位置アドレス
+1390-                765      ;【使用】B, X
+1390-                766      ;【返値】B:アスキーコード（$00の時Z=1）
+1390-                767      ;        X:実行位置アドレス
+1390-                768      ; -----------------------------------------------------------------------
+1390-                769      skip_space:
+1390-E6 00           770 ( 4)         ldab    0,x
+1392-27 07           771 ( 3)         beq     :end
+1394-C1 20           772 ( 2)         cmpb    #SPACE
+1396-22 03           773 ( 3)         bhi     :end
+1398-08              774 ( 1)         inx
+1399-20 F5           775 ( 3)         bra     skip_space
+139B-39              776 ( 5) .end    rts
+139C-                777
+139C-                778
+139C-                779      ; -----------------------------------------------------------------------
+139C-                780      ; 引用符付きの文字列を出力する
+139C-                781      ; Write Quoted Stirng
+139C-                782      ;【引数】B:アスキーコード X:実行位置アドレス
+139C-                783      ;【使用】A, B, X
+139C-                784      ;【返値】真(C=1) / X:次の実行位置アドレス
+139C-                785      ;        偽：引用符がない(C=0) / X:現在の実行位置アドレス
+139C-                786      ; -----------------------------------------------------------------------
+139C-                787      write_quoted_str:
+139C-C1 22           788 ( 2)         cmpb    #$22            ; 一重引用符か？
+139E-27 04           789 ( 3)         beq     :1
+13A0-C1 27           790 ( 2)         cmpb    #$27            ; 二重引用符か？
+13A2-26 19           791 ( 3)         bne     :false          ; 引用符がなければC=0にしてリターン
+13A4-17              792 ( 1) .1      tba                     ; Aレジスタに引用符の種類を保存しておく
+13A5-                793            ; // 終端の引用符をチェック
+13A5-3C              794 ( 5)         pshx
+13A6-08              795 ( 1) .check  inx
+13A7-E6 00           796 ( 4)         ldab    0,x
+13A9-27 14           797 ( 3)         beq     :err10          ; 終端文字なら"Print Statement Error"
+13AB-11              798 ( 1)         cba
+13AC-26 F8           799 ( 3)         bne     :check
+13AE-38              800 ( 4)         pulx
+13AF-                801            ; // 文字列の出力
+13AF-08              802 ( 1) .loop   inx
+13B0-E6 00           803 ( 4)         ldab    0,x
+13B2-11              804 ( 1)         cba                     ; 保存した引用符との比較
+13B3-27 05           805 ( 3)         beq     :true           ; 文字列前後の引用符が一致すれば終了処理
+13B5-BD FF AC        806 ( 6)         jsr     write_char
+13B8-20 F5           807 ( 3)         bra     :loop
+13BA-08              808 ( 1) .true   inx
+13BB-0D              809 ( 1)         sec
+13BC-39              810 ( 5)         rts
+13BD-0C              811 ( 1) .false  clc
+13BE-39              812 ( 5)         rts
+13BF-86 0A           813 ( 2) .err10  ldaa    #10             ; "Print statement error"
+13C1-7E 15 3A        814 ( 3)         jmp     write_err_msg
+13C4-                815
+13C4-                816
+13C4-                817      ; -----------------------------------------------------------------------
+13C4-                818      ; タブを出力する
+13C4-                819      ; Write tabs
+13C4-                820      ;【引数】なし
+13C4-                821      ;【使用】B
+13C4-                822      ;【返値】なし
+13C4-                823      ; -----------------------------------------------------------------------
+13C4-                824      write_tab:
+13C4-BD FF B5        825 ( 6) .top    jsr     write_space
+13C7-7B 07 39        826 ( 4)         tim     #7,<TabCount
+13CA-26 F8           827 ( 3)         bne     :top
+13CC-39              828 ( 5)         rts
+13CD-                829
+13CD-                830
+13CD-                831      ; -----------------------------------------------------------------------
+13CD-                832      ; 式を評価して変数に値を代入する
+13CD-                833      ; Evaluate an expression and assign a value to a variable
+13CD-                834      ;【引数】X:実行位置アドレス *VarAddress:変数のアドレス
+13CD-                835      ;【使用】A, B, X（関連ルーチンでUR0, UR1, UR2, UR3）
+13CD-                836      ;【返値】D:Integer X:次の実行位置アドレス
+13CD-                837      ; -----------------------------------------------------------------------
+13CD-                838      assign_to_var:
+13CD-BD 13 90        839 ( 6)         jsr     skip_space
+13D0-BD 10 CA        840 ( 6)         jsr     eval_expression
+13D3-24 07           841 ( 3)         bcc     :err04
+13D5-3C              842 ( 5)         pshx                    ; 実行位置アドレスを退避
+13D6-DE 8B           843 ( 4)         ldx     <VariableAddr
+13D8-ED 00           844 ( 5)         std     0,x             ; 変数に結果を保存
+13DA-38              845 ( 4)         pulx                    ; 実行位置アドレスを復帰
+13DB-39              846 ( 5)         rts
+13DC-86 04           847 ( 2) .err04  ldaa    #4              ; "Illegal expression"
+13DE-7E 15 3A        848 ( 3)         jmp     write_err_msg
+13E1-                849
+13E1-                850
+13E1-                851      ; -----------------------------------------------------------------------
+13E1-                852      ; listコマンドを実行する
+13E1-                853      ; Execute 'list' command
+13E1-                854      ;【引数】なし
+13E1-                855      ;【使用】A, B, X
+13E1-                856      ;【返値】なし
+13E1-                857      ; -----------------------------------------------------------------------
+13E1-                858      exe_list:
+13E1-CE 04 00        859 ( 3)         ldx     #USERAREATOP
+13E4-                860            ; // 行番号出力
+13E4-EC 00           861 ( 5) .loop   ldd     0,x
+13E6-27 11           862 ( 3)         beq     :end            ; 行番号が$0000（終端）なら終了
+13E8-3C              863 ( 5)         pshx
+13E9-BD 13 32        864 ( 6)         jsr     write_integer
+13EC-38              865 ( 4)         pulx
+13ED-                866            ; // 本文出力
+13ED-08              867 ( 1)         inx                     ; 本文までスキップ
+13EE-08              868 ( 1)         inx
+13EF-08              869 ( 1)         inx
+13F0-BD FF AF        870 ( 6)         jsr     write_line
+13F3-BD FF B2        871 ( 6)         jsr     write_crlf
+13F6-08              872 ( 1)         inx                     ; 次の行番号へ
+13F7-20 EB           873 ( 3)         bra     :loop
+13F9-7E 10 0E        874 ( 3) .end    jmp     tb_main         ; コマンドは実行したら終了
+13FC-                875
+13FC-                876
+13FC-                877      ; -----------------------------------------------------------------------
+13FC-                878      ; Print文を実行する
+13FC-                879      ; Execute 'print' statement
+13FC-                880      ;【引数】X:実行位置アドレス
+13FC-                881      ;【使用】B, X（下位ルーチンでA）
+13FC-                882      ;【返値】なし
+13FC-                883      ; -----------------------------------------------------------------------
+13FC-                884      exe_print:
+13FC-72 01 8F        885 ( 6)         oim     #1,<NewLineFlag ; 改行フラグを'ON'にする
+13FF-BD 13 90        886 ( 6) .loop   jsr     skip_space
+1402-27 37           887 ( 3)         beq     :finish         ; 終端文字なら改行して終了
+1404-BD 13 9C        888 ( 6)         jsr     write_quoted_str ; 引用符があれば文字列を出力する
+1407-25 1B           889 ( 3)         bcs     :nlon
+1409-BD 10 CA        890 ( 6)         jsr     eval_expression
+140C-25 11           891 ( 3)         bcs     :int
+140E-                892            ; // eval_expressionの返値がC=0だった場合は式が存在したのか確認する
+140E-                893            ; // 'print'の次の文字がセミコロンとカンマ、コロンであれば式は無かったとする
+140E-C1 3B           894 ( 2) .check  cmpb    #';'
+1410-27 23           895 ( 3)         beq     :nloff
+1412-C1 2C           896 ( 2)         cmpb    #','
+1414-27 1C           897 ( 3)         beq     :tab
+1416-C1 3A           898 ( 2)         cmpb    #':'
+1418-27 21           899 ( 3)         beq     :finish
+141A-86 04           900 ( 2)         ldaa    #4              ; "Illegal expression"
+141C-7E 15 3A        901 ( 3)         jmp     write_err_msg
+141F-3C              902 ( 5) .int    pshx                    ; 実行位置アドレスを退避
+1420-BD 13 32        903 ( 6)         jsr     write_integer   ; 評価した式を出力
+1423-38              904 ( 4)         pulx                    ; 実行位置アドレスを復帰
+1424-72 01 8F        905 ( 6) .nlon   oim     #1,<NewLineFlag ; 改行フラグを'ON'にする
+1427-BD 13 90        906 ( 6)         jsr     skip_space
+142A-C1 3B           907 ( 2)         cmpb    #';'
+142C-27 07           908 ( 3)         beq     :nloff
+142E-C1 2C           909 ( 2)         cmpb    #','
+1430-26 09           910 ( 3)         bne     :finish
+1432-BD 13 C4        911 ( 6) .tab    jsr     write_tab       ; タブ出力
+1435-7F 00 8F        912 ( 5) .nloff  clr     <NewLineFlag    ; 改行フラグを'OFF'にする
+1438-08              913 ( 1)         inx                     ; 次の文字へ
+1439-20 C4           914 ( 3)         bra     :loop
+143B-7D 00 8F        915 ( 4) .finish tst     <NewLineFlag
+143E-27 03           916 ( 3)         beq     :end            ; 改行フラグが'OFF'なら終了
+1440-BD FF B2        917 ( 6)         jsr     write_crlf      ; 改行フラグが'ON'なら改行出力
+1443-7E 10 74        918 ( 3) .end    jmp     is_multi
+1446-                919
+1446-                920
+1446-                921      ; -----------------------------------------------------------------------
+1446-                922      ; input文を実行する
+1446-                923      ; Execute 'input' statement
+1446-                924      ; -----------------------------------------------------------------------
+1446-                925      exe_input:
+1446-BD 13 90        926 ( 6)         jsr     skip_space
+1449-27 31           927 ( 3)         beq     :end            ; 終端文字なら改行して終了
+144B-BD 13 9C        928 ( 6)         jsr     write_quoted_str ; 引用符があれば文字列を出力する
+144E-24 0A           929 ( 3)         bcc     :1
+1450-E6 00           930 ( 4)         ldab    0,x
+1452-C1 3B           931 ( 2)         cmpb    #';'
+1454-26 29           932 ( 3)         bne     :err00
+1456-08              933 ( 1)         inx
+1457-BD 13 90        934 ( 6)         jsr     skip_space
+145A-BD 13 7B        935 ( 6) .1      jsr     is_variable
+145D-24 20           936 ( 3)         bcc     :err00
+145F-86 01           937 ( 2)         ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
+1461-58              938 ( 1)         aslb                    ; B = 変数領域の下位バイト
+1462-DD 8B           939 ( 4)         std     <VariableAddr   ; 変数アドレスを保存
+1464-                940            ; // 変数の後に余計な文字がないか確認
+1464-                941            ; // 例えば "input a+b" など
+1464-DF 8D           942 ( 4)         stx     <ExePointer     ; 実行位置アドレスを退避
+1466-BD 13 90        943 ( 6)         jsr     skip_space
+1469-27 06           944 ( 3)         beq     :read           ; 終端文字なら入力へ
+146B-C1 3A           945 ( 2)         cmpb    #':'            ; ":"なら入力へ
+146D-26 10           946 ( 3)         bne     :err00          ; それ以外の文字ならエラー
+146F-DE 8D           947 ( 4)         ldx     <ExePointer     ; 実行位置アドレスを復帰
+1471-BD FF A9        948 ( 6) .read   jsr     read_line
+1474-CE 01 00        949 ( 3)         ldx     #Rx_BUFFER
+1477-BD 13 CD        950 ( 6)         jsr     assign_to_var   ; 入力された内容を変数に代入
+147A-DE 8D           951 ( 4)         ldx     <ExePointer     ; 実行位置アドレスを復帰
+147C-7E 10 74        952 ( 3) .end    jmp     is_multi
+147F-4F              953 ( 1) .err00  clra                    ; "Syntax error"
+1480-7E 15 3A        954 ( 3)         jmp     write_err_msg
+1483-                955
+1483-                956
+1483-                957      ; -----------------------------------------------------------------------
+1483-                958      ; if文を実行する
+1483-                959      ; Execute 'if' statement
+1483-                960      ;【引数】X:実行位置アドレス
+1483-                961      ;【使用】B, X
+1483-                962      ;【返値】なし
+1483-                963      ; -----------------------------------------------------------------------
+1483-BD 13 90        964 ( 6) exe_if: jsr     skip_space      ; 空白を読み飛ばし
+1486-27 0B           965 ( 3)         beq     :end            ; 終端文字なら終了
+1488-BD 10 CA        966 ( 6)         jsr     eval_expression ; 式評価
+148B-24 09           967 ( 3)         bcc     :err04
+148D-5D              968 ( 1)         tstb                    ; 真偽値はゼロか否かなので下位8bitのみで判断
+148E-27 03           969 ( 3)         beq     :end
+1490-7E 10 87        970 ( 3)         jmp     exe_line        ; True
+1493-7E 10 0E        971 ( 3) .end    jmp     tb_main         ; Falseならば全て無視され行末まで進む
+1496-86 04           972 ( 2) .err04  ldaa    #4              ; "Illegal expression"
+1498-7E 15 3A        973 ( 3)         jmp     write_err_msg
+149B-                974
+149B-                975
+149B-                976      ; ------------------------------------------------
+149B-                977      ; ブロック転送
+149B-                978      ; Copy memory
+149B-                979      ;【引数】Source:転送元アドレス
+149B-                980      ;        Destination:転送先アドレス
+149B-                981      ;        Bytes:転送バイト数
+149B-                982      ;【使用】A, B, X, R0
+149B-                983      ;【返値】なし
+149B-                984      ; ------------------------------------------------
+149B-                985      mem_copy:
+009D-                986      .Offset .eq     UR0
+149B-DC 94           987 ( 4)         ldd     <Bytes
+149D-27 33           988 ( 3)         beq     :end            ; 転送バイト数が0ならば即終了
+149F-                989            ; // オフセットの計算
+149F-DC 92           990 ( 4)         ldd     <Destination    ; dst - src
+14A1-93 90           991 ( 4)         subd    <Source
+14A3-DD 9D           992 ( 4)         std     <:Offset        ; offset = dst - src
+14A5-                993            ; // 終了判定用のアドレスを計算
+14A5-DC 90           994 ( 4)         ldd     <Source
+14A7-D3 94           995 ( 4)         addd    <Bytes          ; src + bytes = 転元終了アドレス
+14A9-DD 92           996 ( 4)         std     <Destination    ; 転送終了アドレスを代入
+14AB-                997            ; // 転送開始
+14AB-DE 90           998 ( 4)         ldx     <Source         ; 転送開始アドレスを代入
+14AD-                999            ; // 転送するバイト数が奇数か偶数か判断。
+14AD-               1000            ; // 奇数ならByte転送x1 + Word転送、偶数ならWord転送
+14AD-DC 94          1001 ( 4)         ldd     <Bytes
+14AF-04             1002 ( 1)         lsrd                    ; Bytes / 2, 奇数ならC=1
+14B0-24 0E          1003 ( 3)         bcc     :loop           ; 偶数ならWord転送へ
+14B2-               1004            ; // Byte転送
+14B2-A6 00          1005 ( 4)         ldaa    0,x             ; A <- [source]
+14B4-18             1006 ( 2)         xgdx                    ; D = address, X = data
+14B5-D3 9D          1007 ( 4)         addd    <:Offset        ; src - offset = dst
+14B7-18             1008 ( 2)         xgdx                    ; D = data, X = address
+14B8-A7 00          1009 ( 4)         staa    0,x             ; [dst] <- A
+14BA-18             1010 ( 2)         xgdx                    ; D = address, X = data
+14BB-93 9D          1011 ( 4)         subd    <:Offset        ; dst + offset = src
+14BD-18             1012 ( 2)         xgdx                    ; D = data, X = address
+14BE-20 0D          1013 ( 3)         bra     :odd
+14C0-               1014            ; // Word転送
+14C0-EC 00          1015 ( 5) .loop   ldd     0,x
+14C2-18             1016 ( 2)         xgdx
+14C3-D3 9D          1017 ( 4)         addd    <:Offset
+14C5-18             1018 ( 2)         xgdx
+14C6-ED 00          1019 ( 5)         std     0,x
+14C8-18             1020 ( 2)         xgdx
+14C9-93 9D          1021 ( 4)         subd    <:Offset
+14CB-18             1022 ( 2)         xgdx
+14CC-08             1023 ( 1)         inx
+14CD-08             1024 ( 1) .odd    inx
+14CE-9C 92          1025 ( 4)         cpx     <Destination    ; 転送終了アドレスと現在のアドレスを比較
+14D0-26 EE          1026 ( 3)         bne     :loop
+14D2-39             1027 ( 5) .end    rts
+14D3-               1028
+14D3-               1029
+14D3-               1030      ; -----------------------------------------------------------------------
+14D3-               1031      ; テーブル検索
+14D3-               1032      ; Search the keyword table
+14D3-               1033      ;【引数】X:テーブルの先頭アドレス, *ExePointer:実行位置アドレス
+14D3-               1034      ;【使用】A, B, X
+14D3-               1035      ;【結果】真(C=1) / 命令文実行. X:次の実行位置アドレス
+14D3-               1036      ;        偽(C=0) / 何もせずにリターン X:引数*ExePointer（実行位置アドレス）
+14D3-               1037      ; -----------------------------------------------------------------------
+14D3-               1038      search_table:
+14D3-EC 05          1039 ( 5) .top    ldd     5,x             ; キーワードの初めの2文字をDレジスタに
+14D5-91 A5          1040 ( 3)         cmpa    <COMPARE        ; 1文字目を比較
+14D7-26 2F          1041 ( 3)         bne     :false
+14D9-D1 A6          1042 ( 3)         cmpb    <COMPARE+1      ; 2文字目を比較
+14DB-26 2B          1043 ( 3)         bne     :false
+14DD-EC 07          1044 ( 5)         ldd     7,x             ; 次の2文字をDレジスタに
+14DF-4D             1045 ( 1)         tsta                    ; $00（終端記号）か？
+14E0-27 1B          1046 ( 3)         beq     :true
+14E2-91 A7          1047 ( 3)         cmpa    <COMPARE+2      ; 3文字目を比較
+14E4-26 22          1048 ( 3)         bne     :false
+14E6-5D             1049 ( 1)         tstb                    ; $00（終端記号）か？
+14E7-27 14          1050 ( 3)         beq     :true
+14E9-D1 A8          1051 ( 3)         cmpb    <COMPARE+3      ; 4文字目を比較
+14EB-26 1B          1052 ( 3)         bne     :false
+14ED-EC 09          1053 ( 5)         ldd     9,x             ; 次の2文字をDレジスタに
+14EF-4D             1054 ( 1)         tsta                    ; $00（終端記号）か？
+14F0-27 0B          1055 ( 3)         beq     :true
+14F2-91 A9          1056 ( 3)         cmpa    <COMPARE+4      ; 5文字目を比較
+14F4-26 12          1057 ( 3)         bne     :false
+14F6-5D             1058 ( 1)         tstb                    ; $00（終端記号）か？
+14F7-27 04          1059 ( 3)         beq     :true
+14F9-D1 AA          1060 ( 3)         cmpb    <COMPARE+5      ; 6文字目を比較
+14FB-26 0B          1061 ( 3)         bne     :false
+14FD-E6 02          1062 ( 4) .true   ldab    2,x             ; B = 語長
+14FF-EE 03          1063 ( 5)         ldx     3,x             ; X = 命令ルーチンのアドレス
+1501-31             1064 ( 1)         ins                     ; 元のリターンアドレスを削除
+1502-31             1065 ( 1)         ins
+1503-3C             1066 ( 5)         pshx                    ; スタックトップにリターンアドレスを積む
+1504-DE 8D          1067 ( 4)         ldx     <ExePointer
+1506-3A             1068 ( 1)         abx                     ; 実行位置アドレスを文字数分プラスする
+1507-39             1069 ( 5)         rts                     ; 命令ルーチンにジャンプ
+1508-EE 00          1070 ( 5) .false  ldx     0,x             ; リンクポインタを読み込み、次のキーワードに
+150A-26 C7          1071 ( 3)         bne     :top
+150C-DE 8D          1072 ( 4)         ldx     <ExePointer     ; マッチしなければ実行位置ポインタを元に戻す
+150E-0C             1073 ( 1)         clc                     ; false: C=0
+150F-39             1074 ( 5)         rts
+1510-               1075
+1510-               1076
+1510-               1077      ; ***********************************************************************
+1510-               1078      ;   キーワードテーブル Keyword table
+1510-               1079      ; ***********************************************************************
+1510-               1080      ; レコードの構造 Record structure
+1510-               1081      ; +--------+--------+--------+--------+--------+------+-~-+------+--------+
+1510-               1082      ; | リンクポインタ  |  語長  |命令ルーチン位置 |   キーワード    |  終端  |
+1510-               1083      ; |   Link pointer  | Length |Execution address|     Keyword     |  $00   |
+1510-               1084      ; +--------+--------+--------+--------+--------+------+-~-+------+--------+
+1510-               1085      ; キーワードは2文字以上6文字以下
+1510-               1086      CMD_TABLE
+1510-15 1A          1087      .list           .dw     SMT_TABLE:print
+1512-04             1088                      .db     4
+1513-13 E1          1089                      .dw     exe_list
+1515-6C 69 73 74 
+     00             1090                      .az     "list"
+151A-               1091      SMT_TABLE
+151A-15 25          1092      .print          .dw     :input
+151C-05             1093                      .db     5
+151D-13 FC          1094                      .dw     exe_print
+151F-70 72 69 6E 
+     74 00          1095                      .az     "print"
+1525-15 30          1096      .input          .dw     :if
+1527-05             1097                      .db     5
+1528-14 46          1098                      .dw     exe_input
+152A-69 6E 70 75 
+     74 00          1099                      .az     "input"
+1530-15 38          1100      .if             .dw     :bottom
+1532-02             1101                      .db     2
+1533-14 83          1102                      .dw     exe_if
+1535-69 66 00       1103                      .az     "if"
+1538-00 00          1104      .bottom         .dw     $0000           ; リンクポインタ$0000はテーブルの終端
+153A-               1105
+153A-               1106
+153A-               1107      ; -----------------------------------------------------------------------
+153A-               1108      ; エラーメッセージを表示する
+153A-               1109      ; Write Error Messege
+153A-               1110      ;【引数】A: エラーコード
+153A-               1111      ;【使用】A, B, X
+153A-               1112      ;【返値】なし
+153A-               1113      ; -----------------------------------------------------------------------
+153A-               1114      write_err_msg:
+153A-7D 00 39       1115 ( 4)         tst     <TabCount       ; タブ位置がゼロでなければ改行する
+153D-27 03          1116 ( 3)         beq     :1
+153F-BD FF B2       1117 ( 6)         jsr     write_crlf
+1542-CE 15 5B       1118 ( 3) .1      ldx     #ERRMSG
+1545-BD FF AF       1119 ( 6)         jsr     write_line
+1548-16             1120 ( 1)         tab
+1549-CE 15 63       1121 ( 3)         ldx     #ERRCODE
+154C-3A             1122 ( 1)         abx
+154D-EE 00          1123 ( 5)         ldx     0,x
+154F-BD FF AF       1124 ( 6)         jsr     write_line
+1552-BD FF B2       1125 ( 6)         jsr     write_crlf
+1555-DE 80          1126 ( 4)         ldx     <StackPointer
+1557-35             1127 ( 1)         txs
+1558-7E 10 0E       1128 ( 3)         jmp     tb_main
+155B-               1129
+155B-45 52 52 4F 
+     52 3A 20 00    1130      ERRMSG  .az     "ERROR: "
+1563-15 73          1131      ERRCODE .dw     .err00
+1565-15 80          1132              .dw     .err02
+1567-15 93          1133              .dw     .err04
+1569-15 A6          1134              .dw     .err06
+156B-15 BF          1135              .dw     .err08
+156D-15 CB          1136              .dw     .err10
+156F-15 E1          1137              .dw     .err12
+1571-15 F5          1138              .dw     .err14
+1573-53 79 6E 74 
      61 78 20 65 
      72 72 6F 72 
-     00             1102      .err00  .az     "Syntax error"
-154E-4F 75 74 20 
+     00             1139      .err00  .az     "Syntax error"
+1580-4F 75 74 20 
      6F 66 20 72 
      61 6E 67 65 
      20 76 61 6C 
-     75 65 00       1103      .err02  .az     "Out of range value"
-1561-49 6C 6C 65 
+     75 65 00       1140      .err02  .az     "Out of range value"
+1593-49 6C 6C 65 
      67 61 6C 20 
      65 78 70 72 
      65 73 73 69 
-     6F 6E 00       1104      .err04  .az     "Illegal expression"
-1574-43 61 6C 63 
+     6F 6E 00       1141      .err04  .az     "Illegal expression"
+15A6-43 61 6C 63 
      75 6C 61 74 
      65 20 73 74 
      61 63 6B 20 
      6F 76 65 72 
      66 6C 6F 77 
-     00             1105      .err06  .az     "Calculate stack overflow"
-158D-5A 65 72 6F 
+     00             1142      .err06  .az     "Calculate stack overflow"
+15BF-5A 65 72 6F 
      20 44 69 76 
-     69 64 65 00    1106      .err08  .az     "Zero Divide"
-1599-50 72 69 6E 
+     69 64 65 00    1143      .err08  .az     "Zero Divide"
+15CB-50 72 69 6E 
      74 20 73 74 
      61 74 65 6D 
      65 6E 74 20 
      65 72 72 6F 
-     72 00          1107      .err10  .az     "Print statement error"
-15AF-49 6E 76 61 
+     72 00          1144      .err10  .az     "Print statement error"
+15E1-49 6E 76 61 
      6C 69 64 20 
      6C 69 6E 65 
      20 6E 75 6D 
-     62 65 72 00    1108      .err12  .az     "Invalid line number"
-15C3-4D 65 6D 6F 
+     62 65 72 00    1145      .err12  .az     "Invalid line number"
+15F5-4D 65 6D 6F 
      72 79 20 73 
      69 7A 65 20 
      6F 76 65 72 
-     00             1109      .err14  .az     "Memory size over"
-15D4-               1110
-15D4-               1111
-15D4-               1112      ; ***********************************************************************
-15D4-               1113      ;   デバック用ルーチン Debugging routines
-15D4-               1114      ; ***********************************************************************
-15D4-               1115      ; -----------------------------------------------------------------------
-15D4-               1116      ; ユーザーレジスタを表示する
-15D4-               1117      ; Display user registers
-15D4-               1118      ; -----------------------------------------------------------------------
-15D4-36             1119 ( 4) PUTUR:  psha
-15D5-37             1120 ( 4)         pshb
-15D6-3C             1121 ( 5)         pshx
-15D7-CE 16 0A       1122 ( 3)         ldx     #:MSGUR0
-15DA-BD FF AF       1123 ( 6)         jsr     write_line
-15DD-DC 9C          1124 ( 4)         ldd     <UR0
-15DF-BD FF BB       1125 ( 6)         jsr     write_word
-15E2-CE 16 0F       1126 ( 3)         ldx     #:MSGUR1
-15E5-BD FF AF       1127 ( 6)         jsr     write_line
-15E8-DC 9E          1128 ( 4)         ldd     <UR1
-15EA-BD FF BB       1129 ( 6)         jsr     write_word
-15ED-CE 16 15       1130 ( 3)         ldx     #:MSGUR2
-15F0-BD FF AF       1131 ( 6)         jsr     write_line
-15F3-DC A0          1132 ( 4)         ldd     <UR2
-15F5-BD FF BB       1133 ( 6)         jsr     write_word
-15F8-CE 16 1B       1134 ( 3)         ldx     #:MSGUR3
-15FB-BD FF AF       1135 ( 6)         jsr     write_line
-15FE-DC A2          1136 ( 4)         ldd     <UR3
-1600-BD FF BB       1137 ( 6)         jsr     write_word
-1603-BD FF B2       1138 ( 6)         jsr     write_crlf
-1606-38             1139 ( 4)         pulx
-1607-33             1140 ( 3)         pulb
-1608-32             1141 ( 3)         pula
-1609-39             1142 ( 5)         rts
-160A-55 52 30 3D 
-     00             1143      .MSGUR0          .az     "UR0="
-160F-20 55 52 31 
-     3D 00          1144      .MSGUR1          .az     " UR1="
-1615-20 55 52 32 
-     3D 00          1145      .MSGUR2          .az     " UR2="
-161B-20 55 52 33 
-     3D 00          1146      .MSGUR3          .az     " UR3="
+     00             1146      .err14  .az     "Memory size over"
+1606-               1147
+1606-               1148
+1606-               1149      ; ***********************************************************************
+1606-               1150      ;   デバック用ルーチン Debugging routines
+1606-               1151      ; ***********************************************************************
+1606-               1152      ; -----------------------------------------------------------------------
+1606-               1153      ; ユーザーレジスタを表示する
+1606-               1154      ; Display user registers
+1606-               1155      ; -----------------------------------------------------------------------
+1606-36             1156 ( 4) PUTUR:  psha
+1607-37             1157 ( 4)         pshb
+1608-3C             1158 ( 5)         pshx
+1609-CE 16 3C       1159 ( 3)         ldx     #:MSGUR0
+160C-BD FF AF       1160 ( 6)         jsr     write_line
+160F-DC 9D          1161 ( 4)         ldd     <UR0
+1611-BD FF BB       1162 ( 6)         jsr     write_word
+1614-CE 16 41       1163 ( 3)         ldx     #:MSGUR1
+1617-BD FF AF       1164 ( 6)         jsr     write_line
+161A-DC 9F          1165 ( 4)         ldd     <UR1
+161C-BD FF BB       1166 ( 6)         jsr     write_word
+161F-CE 16 47       1167 ( 3)         ldx     #:MSGUR2
+1622-BD FF AF       1168 ( 6)         jsr     write_line
+1625-DC A1          1169 ( 4)         ldd     <UR2
+1627-BD FF BB       1170 ( 6)         jsr     write_word
+162A-CE 16 4D       1171 ( 3)         ldx     #:MSGUR3
+162D-BD FF AF       1172 ( 6)         jsr     write_line
+1630-DC A3          1173 ( 4)         ldd     <UR3
+1632-BD FF BB       1174 ( 6)         jsr     write_word
+1635-BD FF B2       1175 ( 6)         jsr     write_crlf
+1638-38             1176 ( 4)         pulx
+1639-33             1177 ( 3)         pulb
+163A-32             1178 ( 3)         pula
+163B-39             1179 ( 5)         rts
+163C-55 52 30 3D 
+     00             1180      .MSGUR0          .az     "UR0="
+1641-20 55 52 31 
+     3D 00          1181      .MSGUR1          .az     " UR1="
+1647-20 55 52 32 
+     3D 00          1182      .MSGUR2          .az     " UR2="
+164D-20 55 52 33 
+     3D 00          1183      .MSGUR3          .az     " UR3="

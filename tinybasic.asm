@@ -101,6 +101,7 @@ Bytes           .bs     2       ; 転送バイト数
 LineNumber      .bs     2       ; 行番号
 LineLength      .bs     2       ; 行の長さ
 PrgmEndAddr     .bs     2       ; BASICプログラムの最終アドレス
+ExeStateFlag    .bs     1       ; 実行状態フラグ 0 = run, 1以上 = direct
 
 ; General-Purpose Registers
 UR0             *
@@ -139,6 +140,7 @@ cold_start:
 
 
 tb_main:
+        oim     #1,<ExeStateFlag ; 実行状態フラグをdirectに設定
         ldab    #'>'
         jsr     write_char
         jsr     read_line
@@ -248,12 +250,16 @@ exe_line:
         ldd     4,x
         std     <COMPARE+4
         stx     <ExePointer     ; 実行位置アドレスを退避
-        ldx     #SMT_TABLE      ; 文字列テーブルアドレスをセット
-        jsr     search_table    ; テーブル検索実行
+        tst     ExeStateFlag    ; 実行状態フラグの確認
+        beq     :1              ; 0 = runモードであればSMT_TABLEをセット
+        ldx     #CMD_TABLE      ; 1 = directモードであればCMD_TABLEをセット
+        bra     :2
+.1      ldx     #SMT_TABLE
+.2      jsr     search_table    ; テーブル検索実行
         bcc     :err00
 .end    jmp     tb_main
 
-.err00  clra                    ; syntax error.
+.err00  clra                    ; Syntax error.
         jmp     write_err_msg
 
 
@@ -843,6 +849,32 @@ assign_to_var:
 
 
 ; -----------------------------------------------------------------------
+; listコマンドを実行する
+; Execute 'list' command
+;【引数】なし
+;【使用】A, B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_list:
+        ldx     #USERAREATOP
+      ; // 行番号出力
+.loop   ldd     0,x
+        beq     :end            ; 行番号が$0000（終端）なら終了
+        pshx
+        jsr     write_integer
+        pulx
+      ; // 本文出力
+        inx                     ; 本文までスキップ
+        inx
+        inx
+        jsr     write_line
+        jsr     write_crlf
+        inx                     ; 次の行番号へ
+        bra     :loop
+.end    jmp     tb_main         ; コマンドは実行したら終了
+
+
+; -----------------------------------------------------------------------
 ; Print文を実行する
 ; Execute 'print' statement
 ;【引数】X:実行位置アドレス
@@ -1051,7 +1083,12 @@ search_table:
 ; |   Link pointer  | Length |Execution address|     Keyword     |  $00   |
 ; +--------+--------+--------+--------+--------+------+-~-+------+--------+
 ; キーワードは2文字以上6文字以下
-SMT_TABLE:      .eq     *
+CMD_TABLE
+.list           .dw     SMT_TABLE:print
+                .db     4
+                .dw     exe_list
+                .az     "list"
+SMT_TABLE
 .print          .dw     :input
                 .db     5
                 .dw     exe_print
