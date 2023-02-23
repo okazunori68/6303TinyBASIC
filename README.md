@@ -29,10 +29,10 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 - input文
   - `input 変数`
   - `input "文字列";変数`
+  - 複数の変数には対応していません
 - if文
   - `if 条件式 命令分`
   - `then`は使用しません
-  - 複数の変数には対応していません
 
 ## 使い方
 上記URLの[SBC6303技術資料](http://www.amy.hi-ho.ne.jp/officetetsu/storage/sbc6303_techdata.pdf)を参考に簡易モニタ（monitor.hex）をROMに書き込んでください。  
