@@ -878,6 +878,32 @@ assign_to_var:
 
 
 ; -----------------------------------------------------------------------
+; 同じ行番号を検索する
+; Scan equal line number
+;【引数】LineNumber:検索対象の行番号 X:検索を開始する行頭アドレス
+;【使用】A, B, X
+;【返値】真(C=1) / D:行番号 X:その行の開始アドレス
+;        偽(C=0) / D:次に大きな行番号 X:次に大きな行の開始アドレス
+;                  またはD:$0000 X:プログラム終了アドレス
+; -----------------------------------------------------------------------
+scan_line_num:
+.loop   ldd     0,x             ; D:行番号
+        beq     :false          ; プログラム終端まで来たので偽
+        xgdx
+        cpx     <LineNumber
+        xgdx
+        beq     :true           ; 同一の行番号が見つかったので真
+        bgt     :false          ; 対象の行番号より大きくなったので偽
+        ldab    2,x
+        abx
+        bra     :loop
+.true   sec
+        rts
+.false  clc
+        rts
+
+
+; -----------------------------------------------------------------------
 ; runコマンドを実行する
 ; Execute 'run' command
 ;【引数】なし
@@ -1032,6 +1058,45 @@ exe_if: jsr     skip_space      ; 空白を読み飛ばし
         jmp     write_err_msg
 
 
+; -----------------------------------------------------------------------
+; goto文を実行する
+; Execute 'goto' statement
+;【引数】X:実行位置アドレス
+;【使用】A, B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_goto:
+        jsr     skip_space      ; 空白を読み飛ばし
+        beq     :err00          ; 終端文字"Syntax error"
+        jsr     eval_expression ; 式評価
+        bcc     :err04          ; "Illegal expression"
+        bmi     :err12          ; "Invalid line number"
+        std     <LineNumber     ; 飛び先になる行番号を一時保存
+        ldx     <ExeLineAddr    ; X <- 実行中の行の先頭アドレス
+        ldd     0,x             ; 今実行している行の行番号を取得
+        xgdx
+        cpx     <LineNumber     ; 現在の行番号と飛び先の行番号を比較
+        xgdx
+        bcs     :1              ; 現在の行番号 > 飛び先の行番号 = ここから検索
+        ldx     #USERAREATOP    ; 現在の行番号 < 飛び先の行番号 = 先頭から検索
+.1      jsr     scan_line_num   ; 同じ行番号を探す
+        bcc     :err16          ; "Undefined line number"
+        stx     <ExeLineAddr    ; 実行中の行の先頭アドレスを保存
+        inx
+        inx
+        inx
+        jmp     exe_line
+
+.err00  clra                    ; "Syntax error"
+        jmp     write_err_msg
+.err04  ldaa    #4              ; "Illegal expression"
+        jmp     write_err_msg
+.err12  ldaa    #12             ; "Invalid line number"
+        jmp     write_err_msg
+.err16  ldaa    #16             ; "Undefined line number"
+        jmp     write_err_msg
+
+
 ; ------------------------------------------------
 ; ブロック転送
 ; Copy memory
@@ -1164,10 +1229,14 @@ SMT_TABLE
                 .db     5
                 .dw     exe_input
                 .az     "input"
-.if             .dw     :bottom
+.if             .dw     :goto
                 .db     2
                 .dw     exe_if
                 .az     "if"
+.goto           .dw     :bottom
+                .db     4
+                .dw     exe_goto
+                .az     "goto"
 .bottom         .dw     $0000           ; リンクポインタ$0000はテーブルの終端
 
 
@@ -1203,6 +1272,7 @@ ERRCODE .dw     .err00
         .dw     .err10
         .dw     .err12
         .dw     .err14
+        .dw     .err16
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
@@ -1211,6 +1281,7 @@ ERRCODE .dw     .err00
 .err10  .az     "Print statement error"
 .err12  .az     "Invalid line number"
 .err14  .az     "Memory size over"
+.err16  .az     "Undefined line number"
 
 
 ; ***********************************************************************
