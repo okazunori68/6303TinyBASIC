@@ -103,6 +103,7 @@ LineLength      .bs     2       ; 行の長さ
 PrgmEndAddr     .bs     2       ; BASICプログラムの最終アドレス
 ExeStateFlag    .bs     1       ; 実行状態フラグ 0 = run, 1以上 = direct
 ExeLineAddr     .bs     2       ; 実行中の行の先頭アドレス
+ModuloMode      .bs     1       ; 剰余演算フラグ 0 = tranc, 1以上 = floor
 
 ; General-Purpose Registers
 UR0             *
@@ -139,6 +140,7 @@ cold_start:
         clrb
         std     0,x             ; プログラムエリアの先頭を終端行（$0000）にする
         staa    <LineLength     ; 行の長さの上位バイトをゼロにする
+        staa    <ModuloMode     ; 剰余演算をtrunc（0への切捨て除算）にする
       ; // 変数領域の初期化
         ldx     #VARIABLE
 .loop   std     0,x
@@ -495,7 +497,94 @@ CS_mul:
         bra     CS_store
 
 ;
-; 符号付き割り算の考え方
+; trunc : 符号付き割り算の考え方
+; ・剰余は被除数の符号と同一
+;   ・ 7 / 3  = 商  2、剰余  1
+;   ・-7 / 3  = 商 -2、剰余 -1
+;   ・ 7 / -3 = 商 -2、剰余  1
+;   ・-7 / -3 = 商  2、剰余 -1
+;
+CS_div: tst     <ModuloMode
+        bne     CS_div2
+        pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        bsr     div_uint        ; 除算実行
+        xgdx                    ; D <- 商（Quotient） X <- 剰余（Remainder）
+        tst     <QuoSignFlag    ; 商の符号チェック
+        beq     :end            ; '+'なら終了
+.sign   coma                    ; Dレジスタの値を2の補数にする
+        comb
+        addd    #1
+.end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        bra     CS_store
+
+CS_mod: tst     <ModuloMode
+        bne     CS_mod2
+        pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        bsr     div_uint        ; 除算実行。D = 剰余
+        std     <Remainder      ; 剰余はゼロか？
+        beq     :end            ; ゼロであれば終了
+        tst     <RemSignFlag    ; 剰余の符号チェック
+        beq     :end            ; '+'なら終了
+.sign   coma                    ; '-'なら2の補数にする
+        comb
+        addd    #1
+.end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
+        bra     CS_store
+
+div_uint: 
+.Counter        .eq     UR0H
+        ldd     0,x             ; ゼロ除算チェック
+        beq     :err08          ; 除数がゼロならエラー
+        clrb
+        stab    <QuoSignFlag    ; 商の符号フラグを初期化
+        stab    <RemSignFlag    ; 剰余の符号フラグを初期化
+        ldab    #16             ; ループカウンターをセット（16bit分）
+        stab    <:Counter
+        ; // 剰余の符号フラグの設定
+        ldd     2,x             ; Dレジスタに被除数を代入
+        bpl     :1              ; 被除数が正であれば剰余の符号は正（0）
+        inc     <RemSignFlag    ; 被除数が負であれば剰余の符号は負（1）
+        ; // 商の符号フラグの設定
+.1      eora    0,x             ; 被除数の符号と除数の符号のXORを取る
+        bpl     :2              ; 被除数と除数の符号が同じなら商の符号は正（0）
+        inc     <QuoSignFlag    ; 被除数と除数の符号が違えば商の符号は負（1）
+        ; // 除数を絶対値にする
+.2      ldd     0,x             ; D <- 除数
+        bpl     :3
+        coma                    ; 除数が負なら絶対値にする
+        comb
+        addd    #1
+.3      std     <Divisor        ; 除数を保存
+        ; // 被除数を絶対値にする
+        ldd     2,x             ; D <- 被除数
+        bpl     :4
+        coma                    ; 被除数が負なら絶対値にする
+        comb
+        addd    #1
+        ; // 除算実行
+.4      xgdx                    ; X <- 被除数
+        clra                    ; D（WORK）をクリア
+        clrb
+.loop   xgdx                    ; X（被除数）を左シフト
+        asld
+        xgdx
+        rolb                    ; 被除数のMSBをWORKのLSBに代入
+        rola
+        subd    <Divisor        ; WORK - 除数
+        inx                     ; XレジスタのLSBを1にセットしておく
+        bcc     :5              ; WORKから除数を引けた？
+        addd    <Divisor        ; 引けなければ除数を足して...
+        dex                     ; XレジスタのLSBを0に戻す
+.5      dec     <:Counter       ; ループカウンターを1引く
+        bne     :loop
+        rts
+.err08  ldaa    #8              ; "Zero Divide"
+        jmp     write_err_msg
+
+;
+; floor : 符号付き割り算の考え方
 ; ・剰余は除数の符号と同一
 ;   ・ 7 / 3  = 商  2、剰余  1
 ;   ・-7 / 3  = 商 -3、剰余  2
@@ -508,9 +597,10 @@ CS_mul:
 ;       2.その結果を除数と同じ符号にする
 ;       3.ただし、除数がゼロの場合は剰余もゼロ
 ;
-CS_div: pshx                    ; 実行位置アドレスを退避
+CS_div2:
+        pshx                    ; 実行位置アドレスを退避
         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-        bsr     div_uint        ; 除算実行
+        bsr     div_uint2       ; 除算実行
         xgdx                    ; D <- 商（Quotient） X <- 剰余（Remainder）
         tst     <QuoSignFlag    ; 商の符号チェック
         beq     :end            ; '+'なら終了
@@ -521,11 +611,12 @@ CS_div: pshx                    ; 実行位置アドレスを退避
         comb
         addd    #1
 .end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
-        bra     CS_store
+        jmp     CS_store
 
-CS_mod: pshx                    ; 実行位置アドレスを退避
+CS_mod2:
+        pshx                    ; 実行位置アドレスを退避
         ldx     <CStackPtr      ; X <- 計算スタックポインタ
-        bsr     div_uint        ; 除算実行。D = 剰余
+        bsr     div_uint2        ; 除算実行。D = 剰余
         std     <Remainder      ; 剰余はゼロか？
         beq     :end            ; ゼロであれば終了
         tst     <QuoSignFlag    ; 被除数・除数の符号一致チェック
@@ -538,9 +629,9 @@ CS_mod: pshx                    ; 実行位置アドレスを退避
         comb
         addd    #1
 .end    ldx     <CStackPtr      ; X <- 計算スタックポインタ
-        bra     CS_store
+        jmp     CS_store
 
-div_uint: 
+div_uint2: 
 .Counter        .eq     UR0H
         ldd     0,x             ; ゼロ除算チェック
         beq     :err08          ; 除数がゼロならエラー
@@ -564,7 +655,7 @@ div_uint:
         comb
         addd    #1
 .3      std     <Divisor        ; 除数を保存
-        ; // 非除数を絶対値にする
+        ; // 被除数を絶対値にする
         ldd     2,x             ; D <- 被除数
         bpl     :4
         coma                    ; 被除数が負なら絶対値にする
@@ -1097,6 +1188,30 @@ exe_goto:
         jmp     write_err_msg
 
 
+; -----------------------------------------------------------------------
+; trunc文を実行する
+; Execute 'trunc' statement
+;【引数】X:実行位置アドレス
+;【使用】B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_trunc:
+        clr     <ModuloMode     ; tranc = 0 にする
+        jmp     is_multi
+
+
+; -----------------------------------------------------------------------
+; floor文を実行する
+; Execute 'trunc' statement
+;【引数】X:実行位置アドレス
+;【使用】B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_floor:
+        oim     #1,<ModuloMode  ; floor = 1以上 にする
+        jmp     is_multi
+
+
 ; ------------------------------------------------
 ; ブロック転送
 ; Copy memory
@@ -1233,10 +1348,18 @@ SMT_TABLE
                 .db     2
                 .dw     exe_if
                 .az     "if"
-.goto           .dw     :bottom
+.goto           .dw     :trunc
                 .db     4
                 .dw     exe_goto
                 .az     "goto"
+.trunc          .dw     :floor
+                .db     5
+                .dw     exe_trunc
+                .az     "trunc"
+.floor          .dw     :bottom
+                .db     5
+                .dw     exe_floor
+                .az     "floor"
 .bottom         .dw     $0000           ; リンクポインタ$0000はテーブルの終端
 
 
