@@ -36,6 +36,16 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 - goto文
   - `goto 行番号または式`
   - 指定した、または数式評価された行番号に実行を移します
+- trunc文
+  - パラメータはありません。剰余演算を「0への切捨て除算」に設定します
+  - 0への切捨て除算はCやGO、Swift、MSX-BASICなど大半の言語で使われている方法です
+  - 例：-3 / 2 = 1.5 ですが、0に近い方に切り捨てられ -1 となります
+  - **プログラム実行時はこちらがデフォルトです**
+- floor文
+  - パラメータはありません。剰余演算を「負の無限大への切捨て除算」に設定します
+  - 負の無限大への切捨て除算はMathematicaやR、Python、Rubyで使われている方法です
+  - 例：-3 / 2 = 1.5 ですが、負の無限大に近い方に切り捨てられ -2 となります
+
 
 ## 使い方
 上記URLの[SBC6303技術資料](http://www.amy.hi-ho.ne.jp/officetetsu/storage/sbc6303_techdata.pdf)を参考に簡易モニタ（monitor.hex）をROMに書き込んでください。  
