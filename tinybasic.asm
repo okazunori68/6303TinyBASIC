@@ -55,8 +55,8 @@ Rx_BUFFER       .eq     $0100   ; SCI Rx Buffer ($0100-0148,73byte)
 Rx_BUFFER_END   .eq     $0148   ; 73byte（72character）
 CSTACK          .eq     $0149   ; 計算スタック (Calculate stack, 40byte)
 VARIABLE        .eq     $01c2   ; 変数26文字 ($01c2-01f5, 52byte)
-USERAREATOP     .eq     $0400   ; ユーザーエリア開始アドレス
-USERAREABTM     .eq     $0dff-2 ; ユーザーエリア終了アドレス
+USER_AREA_TOP   .eq     $0400   ; ユーザーエリア開始アドレス
+USER_AREA_BTM   .eq     $0dff-2 ; ユーザーエリア終了アドレス
 
 ; ***********************************************************************
 ;   システム変数 System variables
@@ -134,7 +134,7 @@ init_tinybasic:
 
 cold_start:
       ; // プログラムエリアの初期化
-        ldx     #USERAREATOP
+        ldx     #USER_AREA_TOP
         stx     <PrgmEndAddr    ; BASICプログラムエリア開始アドレス = 終了アドレス
         clra
         clrb
@@ -183,7 +183,7 @@ edit_mode:
         ldd     <PrgmEndAddr 
         addd    <LineLength     ; D <- 行の長さを足した最終アドレス
         xgdx
-        cpx     #USERAREABTM    ; ユーザーエリアを超えていないかチェック
+        cpx     #USER_AREA_BTM  ; ユーザーエリアを超えていないかチェック
         xgdx
         bcc     :err14          ; "Memory size over"
         std     <PrgmEndAddr    ; 新しい最終アドレスを設定
@@ -1012,7 +1012,7 @@ exe_run:
         cpx     #VARIABLE+52
         bne     :1
         clr     <ExeStateFlag   ; 実行状態フラグをrunに設定
-        ldx     #USERAREATOP
+        ldx     #USER_AREA_TOP
 .loop   stx     <ExeLineAddr    ; 実行中の行の先頭アドレスを保存
         ldd     0,x
         beq     :end            ; 行番号が$0000なら終了
@@ -1032,7 +1032,7 @@ exe_run:
 ;【返値】なし
 ; -----------------------------------------------------------------------
 exe_list:
-        ldx     #USERAREATOP
+        ldx     #USER_AREA_TOP
       ; // 行番号出力
 .loop   ldd     0,x
         beq     :end            ; 行番号が$0000（終端）なら終了
@@ -1169,7 +1169,7 @@ exe_goto:
         cpx     <LineNumber     ; 現在の行番号と飛び先の行番号を比較
         xgdx
         bcs     :1              ; 現在の行番号 > 飛び先の行番号 = ここから検索
-        ldx     #USERAREATOP    ; 現在の行番号 < 飛び先の行番号 = 先頭から検索
+        ldx     #USER_AREA_TOP  ; 現在の行番号 < 飛び先の行番号 = 先頭から検索
 .1      jsr     scan_line_num   ; 同じ行番号を探す
         bcc     :err16          ; "Undefined line number"
         stx     <ExeLineAddr    ; 実行中の行の先頭アドレスを保存
