@@ -52,8 +52,9 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 SBC6303を起動し、プログラム（tinybasic.s19）を'l'コマンドで読み込ませてください。  
 **$0000〜$1fffまでのRAM（8Kバイト）が必要です。**  
 
-S19ファイルの読み込みは遅延は不要です  
-BASICプログラムの読み込みはmacOS上のCoolTermでは1ms/行、Windows上のTeraTermでは50ms/行の遅延が必要でした
+XON/XOFFフロー制御を実装しています。  
+ターミナルソフトのソフトウェアフロー制御を有効にしてください。  
+テキスト貼り付け時の遅延は不要です
 
 ## 開発環境
 - macOS Monterey
