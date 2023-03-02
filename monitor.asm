@@ -9,7 +9,7 @@
 ; * https://github.com/sbprojects/sbasm3
 ;
         .cr     6301            ; HD6301 Cross Overlay
-        .tf     monitor.s19,s19 ; Target File Name
+        .tf     monitor.hex,int ; Target File Name
         .lf     monitor         ; List File Name
 
 ; ***********************************************************************
@@ -26,16 +26,15 @@ SPACE           .eq     $20     ; Space
 CR              .eq     $0d     ; Carriage Return
 LF              .eq     $0a     ; Line Feed
 DEL             .eq     $7f     ; Delete
+XON             .eq     $11     ; DC1
+XOFF            .eq     $13     ; DC3
 
 RAM_START       .eq     $0020
 RAM_END         .eq     $1fff
 ROM_START       .eq     $e000
 ROM_END         .eq     $ffff
-STACK           .eq     $0fff
-
 PROGRAM_START   .eq     $1000   ; プログラム開始アドレス
-Rx_BUFFER       .eq     $0100   ; SCI Rx Buffer
-Rx_BUFFER_END   .eq     $0148   ; 73byte（72文字分）
+STACK           .eq     $0fff
 
 ; ***********************************************************************
 ;   システム変数 System variables
@@ -53,9 +52,25 @@ VEC_SWI         .bs     3
 VEC_NMI         .bs     3
 BreakPointFlag  .bs     1
 TabCount        .bs     1       ; タブ用の文字数カウンタ
+RxBffrQty       .bs     1       ; 受信バッファデータ数
+RxBffrReadPtr   .bs     2       ; 受信バッファ読み込みポインタ
+RxBffrWritePtr  .bs     2       ; 受信バッファ書き込みポインタ
 ; General-Purpose Registers
 R0              .bs     2
 R1              .bs     2
+
+; ***********************************************************************
+;   システムワークエリア System work area
+; ***********************************************************************
+        .sm     RAM
+        .or     $0100
+; 各種バッファ
+Rx_BUFFER       .bs     64      ; 受信バッファ（$0100-$013f）
+Rx_BUFFER_END   .eq     *-1
+Rx_BFFR_SIZE    .eq     Rx_BUFFER_END-Rx_BUFFER+1
+TEXT_BFFR       .bs     73      ; テキストバッファ（$0140-$188: 73byte）
+TEXT_BFFR_END   .eq     *-1
+TEXT_BFFR_SIZE  .eq     TEXT_BFFR_END-TEXT_BFFR+1
 
 ; ***********************************************************************
 ;   初期化 Initialize
@@ -76,7 +91,7 @@ init_sbc6303:
       ; // SCI設定
         ldab    #E128|NRZIN     ; 9,600bps
         stab    <RMCR
-        ldab    #TE|RE          ; SCI有効化
+        ldab    #TE|RE|RIE      ; SCIおよび受信割り込み有効化
         stab    <TRCSR
         ldab    <RDR            ; 空読み
       ; // Interrupt Vector Hooking設定
@@ -88,15 +103,24 @@ init_sbc6303:
         ldx     #swi_routine
         staa    <VEC_SWI
         stx     <VEC_SWI+1
+      ; // SCIは受信のみ割り込み処理
+        ldx     #rx_interrupt
+        staa    <VEC_SCI
+        stx     <VEC_SCI+1
       ; // その他の割り込みはそのままrti
         ldaa    #$3d            ; '$3d' = rti
-        staa    <VEC_SCI
         staa    <VEC_TOF
         staa    <VEC_OCF
         staa    <VEC_ICF
         staa    <VEC_IRQ
         staa    <VEC_NMI
-        clr     <BreakPointFlag
+      ; // 各種ポインタ、フラグ初期化
+        clra
+        staa    <BreakPointFlag
+        staa    <RxBffrQty
+        ldx     #Rx_BUFFER
+        stx     <RxBffrReadPtr
+        stx     <RxBffrWritePtr
       ; // 割り込み許可
         cli
       ; // スタートメッセージ出力
@@ -345,45 +369,86 @@ trap_routine:
         ldx     #MSG_REG_END
         jsr     write_line
         oim     #$ff,<BreakPointFlag
+        cli                     ; 割り込み許可してからmainに戻る
         jmp     mon_main
 
-
-; ***********************************************************************
-;   サービスルーチン Service Routine
-; ***********************************************************************
-
-; -----------------------------------------------------------------------
-; SCIから一文字受信する（エラー処理はしない）
-; Read one character from SCI
-;【引数】なし
-;【使用】B
-;【返値】B:アスキーコード
+; ------------------------------------------------
+; SCIから一文字受信してバッファに書き込む（エラー処理はしない）
+; Read one character from SCI and write it to the receive buffer
 ; TRCSR = RDRF|ORFE|TDRE|RIE|RE|TIE|TE|WU
 ;           0    0  = 受信データなし
 ;           1    0  = 受信データあり
 ;           0    1  = フレーミングエラー
 ;           1    1  = オーバーランエラー
-; -----------------------------------------------------------------------
-read_char:
-.top    tim     #RDRF|ORFE,<TRCSR      ; SCIステータスレジスタ読み込み
-        beq     :top
-        tim     #ORFE,<TRCSR
+; ------------------------------------------------
+rx_interrupt:
+        tim     #ORFE,<TRCSR            ; SCIステータスレジスタのORFEフラグ確認
+        beq     :read
+        ldab    <RDR                    ; 空読み（ORFEフラグのクリア）
+        bra     :end
+.read   ldaa    <RDR                    ; **Aレジスタ**に読み込んだデータを保存しておく
+      ; // バッファオーバーフローの確認
+        ldab    <RxBffrQty
+        cmpb    #Rx_BFFR_SIZE
         beq     :end
-        ldab    <RDR
-        bra     :top
-.end    ldab    <RDR
-        rts
+      ; // リングバッファの残りの確認
+        incb                            ; データ数 +1
+        stab    <RxBffrQty
+        cmpb    #Rx_BFFR_SIZE-16        ; リングバッファの残りバイトは16以下か？
+        bne     :write                  ; No. データ書き込み
+        ldab    #XOFF                   ; Yes. XOFF送出
+        jsr     write_char
+      ; // 受信データの書き込み
+.write  ldx     <RxBffrWritePtr
+        staa    0,x
+        inx
+        xgdx                            ; Ring buffer write pointer の下位8bitを$39でマスク
+        andb    #Rx_BFFR_SIZE-1
+        xgdx
+        stx     <RxBffrWritePtr
+.end    rti
 
-; -----------------------------------------------------------------------
-; SCIから文字列をRxバッファに受信する（終端記号$00）
-; エコー、改行付き。改行コードは「CRLF」または「LF」
-; Read a string from SCI into Rx buffer
+; ***********************************************************************
+;   サービスルーチン Service Routine
+; ***********************************************************************
+
+; ------------------------------------------------
+; 受信バッファから一文字読み出す
+; Read one character from the receive buffer
 ;【引数】なし
 ;【使用】B, X
-;【返値】B:Null, X:バッファ終了位置
-; -----------------------------------------------------------------------
+;【返値】B:アスキーコード
+; ------------------------------------------------
+read_char:
+        pshx
+.loop   ldab    <RxBffrQty              ; データ数が1以上になるまでループ
+        beq     :loop
+        decb                            ; データ数 -1
+        stab    <RxBffrQty
+        cmpb    #16                     ; リングバッファのデータ数は16以下か？
+        bne     :read                   ; No. データ書き込み
+        ldab    #XON                    ; Yes. XON送出
+        bsr     write_char
+.read   ldx     <RxBffrReadPtr
+        ldab    0,x
+        inx
+        xgdx                            ; buffer Read pointer の下位8bitを$39でマスク
+        andb    #Rx_BFFR_SIZE-1
+        xgdx
+        stx     <RxBffrReadPtr
+        pulx
+        rts
+
+; ------------------------------------------------
+; 受信バッファから一行分の文字列をテキストバッファに読み出す（終端記号$00）
+; エコー、改行付き。改行コードは「CRLF」または「LF」
+; Read a string from the receive buffer and write it to the text buffer
+;【引数】なし
+;【使用】B, X
+;【返値】B:Null, X:テキストバッファ終了位置
+; ------------------------------------------------
 read_line:
-        ldx     #Rx_BUFFER
+        ldx     #TEXT_BFFR
 .loop   bsr     read_char
         cmpb    #BS             ; 入力文字がBSならば…
         beq     :bs             ; バックスペース処理へ
@@ -393,14 +458,14 @@ read_line:
         bcc     :loop           ; なにもしない
         cmpb    #SPACE          ; b < SPACE ?
         bcs     :loop           ; なにもしない
-        cpx     #Rx_BUFFER_END  ; バッファ終端チェック
+        cpx     #TEXT_BFFR_END  ; バッファ終端チェック
         beq     :loop           ; 73文字目ならなにもしない
         bsr     write_char      ; echo
         stab    0,x             ; バッファに文字を収納
         inx                     ; ポインタを進める
         bra     :loop           ; 次の文字入力
       ; // バックスペース処理
-.bs     cpx     #Rx_BUFFER      ; ポインタ位置が一文字目ならば…
+.bs     cpx     #TEXT_BFFR      ; ポインタ位置が一文字目ならば…
         beq     :loop           ; なにもしない
         bsr     write_char      ; 一文字後退
         ldab    #SPACE          ; 空白を表示（文字を消去）
@@ -412,12 +477,12 @@ read_line:
       ; // 終端処理
       ; // 文字数が72文字の時、次のアドレスを指していない
       ; // その場合はポインタを+1する。
-.end    cpx     #Rx_BUFFER_END-1
+.end    cpx     #TEXT_BFFR_END-1
         bne     :noinc
         inx
 .noinc  clrb                    ; $00:終端記号
         stab    0,x
-        bra     write_crlf      ; 改行してrts
+        jmp     write_crlf      ; 改行してrts
 
 ; -----------------------------------------------------------------------
 ; SCIに一文字送信する
