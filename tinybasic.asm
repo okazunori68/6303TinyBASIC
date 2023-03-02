@@ -12,14 +12,14 @@
         .tf     tinybasic.s19,s19
         .lf     tinybasic
 
-; ********************************************************************
+; ***********************************************************************
 ;   HD6303R Internal Registers
-; ********************************************************************
+; ***********************************************************************
         .in     ./HD6303R_chip.def
 
 ; ***********************************************************************
 ;   ジャンプテーブル Service routine jump table
-; ********************************************************************
+; ***********************************************************************
 init_sbc6303            .eq     $ffa0
 mon_main                .eq     $ffa3
 read_char               .eq     $ffa6
@@ -43,20 +43,18 @@ SPACE           .eq     $20     ; Space
 CR              .eq     $0d     ; Carriage Return
 LF              .eq     $0a     ; Line Feed
 DEL             .eq     $7f     ; Delete
+XON             .eq     $11     ; DC1
+XOFF            .eq     $13     ; DC3
 
 RAM_START       .eq     $0020
 RAM_END         .eq     $1fff
 ROM_START       .eq     $e000
 ROM_END         .eq     $ffff
+PROGRAM_START   .eq     $1000   ; プログラム開始アドレス
 STACK           .eq     $0fff
 
-PROGRAM_START   .eq     $1000
-Rx_BUFFER       .eq     $0100   ; SCI Rx Buffer ($0100-0148,73byte)
-Rx_BUFFER_END   .eq     $0148   ; 73byte（72character）
-CSTACK          .eq     $0149   ; 計算スタック (Calculate stack, 40byte)
-VARIABLE        .eq     $01c2   ; 変数26文字 ($01c2-01f5, 52byte)
-USERAREATOP     .eq     $0400   ; ユーザーエリア開始アドレス
-USERAREABTM     .eq     $0dff-2 ; ユーザーエリア終了アドレス
+USER_AREA_TOP   .eq     $0400   ; ユーザーエリア開始アドレス
+USER_AREA_BTM   .eq     $0dff-2 ; ユーザーエリア終了アドレス
 
 ; ***********************************************************************
 ;   システム変数 System variables
@@ -75,9 +73,25 @@ VEC_SWI         .bs     3
 VEC_NMI         .bs     3
 BreakPointFlag  .bs     1
 TabCount        .bs     1       ; タブ用の文字数カウンタ
+RxBffrQty       .bs     1       ; 受信バッファデータ数
+RxBffrReadPtr   .bs     2       ; 受信バッファ読み込みポインタ
+RxBffrWritePtr  .bs     2       ; 受信バッファ書き込みポインタ
 ; General-Purpose Registers
 R0              .bs     2
 R1              .bs     2
+
+; ***********************************************************************
+;   システムワークエリア System work area
+; ***********************************************************************
+        .sm     RAM
+        .or     $0100
+; 各種バッファ
+Rx_BUFFER       .bs     64      ; 受信バッファ（$0100-$013f）
+Rx_BUFFER_END   .eq     *-1
+Rx_BFFR_SIZE    .eq     Rx_BUFFER_END-Rx_BUFFER+1
+TEXT_BFFR       .bs     73      ; テキストバッファ（$0140-$188: 73byte）
+TEXT_BFFR_END   .eq     *-1
+TEXT_BFFR_SIZE  .eq     TEXT_BFFR_END-TEXT_BFFR+1
 
 ; ***********************************************************************
 ;   変数 Variables
@@ -122,6 +136,19 @@ UR3L            .bs     1
 COMPARE         .bs     6       ; 文字列比較用バッファ
 
 ; ***********************************************************************
+;   ワークエリア work area
+; ***********************************************************************
+        .sm     RAM
+        .or     $0200
+CSTACK          .bs     40      ; 計算スタック (Calculate stack)
+CSTACK_BTM      .eq     *-1
+CSTACK_SIZE     .eq     CSTACK_BTM-CSTACK+1
+        .or     $02c2
+VARIABLE        .bs     52      ; 変数26文字 ($01c2-01f5)
+VARIABLE_END    .eq     *-1
+VARIABLE_SIZE   .eq     VARIABLE_END-VARIABLE+1
+
+; ***********************************************************************
 ;   Program Start
 ; ***********************************************************************
         .sm     CODE
@@ -134,7 +161,7 @@ init_tinybasic:
 
 cold_start:
       ; // プログラムエリアの初期化
-        ldx     #USERAREATOP
+        ldx     #USER_AREA_TOP
         stx     <PrgmEndAddr    ; BASICプログラムエリア開始アドレス = 終了アドレス
         clra
         clrb
@@ -146,7 +173,7 @@ cold_start:
 .loop   std     0,x
         inx
         inx
-        cpx     #VARIABLE+52
+        cpx     #VARIABLE+VARIABLE_SIZE
         bne     :loop
 
 
@@ -155,7 +182,7 @@ tb_main:
         ldab    #'>'
         jsr     write_char
         jsr     read_line
-        ldx     #Rx_BUFFER      ; 実行位置アドレスをセット
+        ldx     #TEXT_BFFR      ; 実行位置アドレスをセット
       ; // 行番号判定
         jsr     get_int_from_decimal
         bcc     execute_mode    ; 先頭が数値でなければ実行モード
@@ -183,7 +210,7 @@ edit_mode:
         ldd     <PrgmEndAddr 
         addd    <LineLength     ; D <- 行の長さを足した最終アドレス
         xgdx
-        cpx     #USERAREABTM    ; ユーザーエリアを超えていないかチェック
+        cpx     #USER_AREA_BTM  ; ユーザーエリアを超えていないかチェック
         xgdx
         bcc     :err14          ; "Memory size over"
         std     <PrgmEndAddr    ; 新しい最終アドレスを設定
@@ -311,7 +338,7 @@ eval_expression:
         stx     <:SP
         ldx     <:X
       ; // 計算スタックの初期化
-        ldd     #CSTACK+40+1    ; 40byte分
+        ldd     #CSTACK_BTM+1
         std     <CStackPtr
       ; // 式評価開始
         bsr     expr_4th
@@ -1009,10 +1036,10 @@ exe_run:
 .1      std     0,x
         inx
         inx
-        cpx     #VARIABLE+52
+        cpx     #VARIABLE+VARIABLE_SIZE
         bne     :1
         clr     <ExeStateFlag   ; 実行状態フラグをrunに設定
-        ldx     #USERAREATOP
+        ldx     #USER_AREA_TOP
 .loop   stx     <ExeLineAddr    ; 実行中の行の先頭アドレスを保存
         ldd     0,x
         beq     :end            ; 行番号が$0000なら終了
@@ -1032,7 +1059,7 @@ exe_run:
 ;【返値】なし
 ; -----------------------------------------------------------------------
 exe_list:
-        ldx     #USERAREATOP
+        ldx     #USER_AREA_TOP
       ; // 行番号出力
 .loop   ldd     0,x
         beq     :end            ; 行番号が$0000（終端）なら終了
@@ -1122,7 +1149,7 @@ exe_input:
         bne     :err00          ; それ以外の文字ならエラー
         ldx     <ExePointer     ; 実行位置アドレスを復帰
 .read   jsr     read_line
-        ldx     #Rx_BUFFER
+        ldx     #TEXT_BFFR
         jsr     assign_to_var   ; 入力された内容を変数に代入
         ldx     <ExePointer     ; 実行位置アドレスを復帰
 .end    jmp     is_multi
@@ -1169,7 +1196,7 @@ exe_goto:
         cpx     <LineNumber     ; 現在の行番号と飛び先の行番号を比較
         xgdx
         bcs     :1              ; 現在の行番号 > 飛び先の行番号 = ここから検索
-        ldx     #USERAREATOP    ; 現在の行番号 < 飛び先の行番号 = 先頭から検索
+        ldx     #USER_AREA_TOP  ; 現在の行番号 < 飛び先の行番号 = 先頭から検索
 .1      jsr     scan_line_num   ; 同じ行番号を探す
         bcc     :err16          ; "Undefined line number"
         stx     <ExeLineAddr    ; 実行中の行の先頭アドレスを保存
