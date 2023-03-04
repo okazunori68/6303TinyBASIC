@@ -1459,113 +1459,122 @@ FFFF-                 52      ROM_END         .eq     $ffff
 1684-7D 00 39       1401 ( 4)         tst     <TabCount       ; タブ位置がゼロでなければ改行する
 1687-27 03          1402 ( 3)         beq     :1
 1689-BD FF B2       1403 ( 6)         jsr     write_crlf
-168C-CE 16 A5       1404 ( 3) .1      ldx     #ERRMSG
+168C-CE 16 B7       1404 ( 3) .1      ldx     #ERRMSG1
 168F-BD FF AF       1405 ( 6)         jsr     write_line
 1692-16             1406 ( 1)         tab
-1693-CE 16 AD       1407 ( 3)         ldx     #ERRCODE
+1693-CE 16 C3       1407 ( 3)         ldx     #ERRCODE
 1696-3A             1408 ( 1)         abx
 1697-EE 00          1409 ( 5)         ldx     0,x
 1699-BD FF AF       1410 ( 6)         jsr     write_line
-169C-BD FF B2       1411 ( 6)         jsr     write_crlf
-169F-DE 80          1412 ( 4)         ldx     <StackPointer
-16A1-35             1413 ( 1)         txs
-16A2-7E 10 1C       1414 ( 3)         jmp     tb_main
-16A5-               1415
-16A5-45 52 52 4F 
-     52 3A 20 00    1416      ERRMSG  .az     "ERROR: "
-16AD-16 BF          1417      ERRCODE .dw     .err00
-16AF-16 CC          1418              .dw     .err02
-16B1-16 DF          1419              .dw     .err04
-16B3-16 F2          1420              .dw     .err06
-16B5-17 0B          1421              .dw     .err08
-16B7-17 17          1422              .dw     .err10
-16B9-17 2D          1423              .dw     .err12
-16BB-17 41          1424              .dw     .err14
-16BD-17 52          1425              .dw     .err16
-16BF-53 79 6E 74 
+169C-7D 00 9C       1411 ( 4)         tst     ExeStateFlag    ; 実行モードか？
+169F-26 0D          1412 ( 3)         bne     :2              ; No. 行番号を表示せずにスキップ
+16A1-CE 16 BE       1413 ( 3)         ldx     #ERRMSG2        ; Yes. 行番号を表示する
+16A4-BD FF AF       1414 ( 6)         jsr     write_line
+16A7-DE 9D          1415 ( 4)         ldx     <ExeLineAddr
+16A9-EC 00          1416 ( 5)         ldd     0,x
+16AB-BD 13 C9       1417 ( 6)         jsr     write_integer
+16AE-BD FF B2       1418 ( 6) .2      jsr     write_crlf
+16B1-DE 80          1419 ( 4)         ldx     <StackPointer
+16B3-35             1420 ( 1)         txs
+16B4-7E 10 1C       1421 ( 3)         jmp     tb_main
+16B7-               1422
+16B7-4F 6F 70 73 
+     21 20 00       1423      ERRMSG1 .az     "Oops! "
+16BE-20 69 6E 20 
+     00             1424      ERRMSG2 .az     " in "
+16C3-16 D5          1425      ERRCODE .dw     .err00
+16C5-16 E2          1426              .dw     .err02
+16C7-16 F5          1427              .dw     .err04
+16C9-17 08          1428              .dw     .err06
+16CB-17 21          1429              .dw     .err08
+16CD-17 2D          1430              .dw     .err10
+16CF-17 43          1431              .dw     .err12
+16D1-17 57          1432              .dw     .err14
+16D3-17 68          1433              .dw     .err16
+16D5-53 79 6E 74 
      61 78 20 65 
      72 72 6F 72 
-     00             1426      .err00  .az     "Syntax error"
-16CC-4F 75 74 20 
+     00             1434      .err00  .az     "Syntax error"
+16E2-4F 75 74 20 
      6F 66 20 72 
      61 6E 67 65 
      20 76 61 6C 
-     75 65 00       1427      .err02  .az     "Out of range value"
-16DF-49 6C 6C 65 
+     75 65 00       1435      .err02  .az     "Out of range value"
+16F5-49 6C 6C 65 
      67 61 6C 20 
      65 78 70 72 
      65 73 73 69 
-     6F 6E 00       1428      .err04  .az     "Illegal expression"
-16F2-43 61 6C 63 
+     6F 6E 00       1436      .err04  .az     "Illegal expression"
+1708-43 61 6C 63 
      75 6C 61 74 
      65 20 73 74 
      61 63 6B 20 
      6F 76 65 72 
      66 6C 6F 77 
-     00             1429      .err06  .az     "Calculate stack overflow"
-170B-5A 65 72 6F 
+     00             1437      .err06  .az     "Calculate stack overflow"
+1721-5A 65 72 6F 
      20 44 69 76 
-     69 64 65 00    1430      .err08  .az     "Zero Divide"
-1717-50 72 69 6E 
+     69 64 65 00    1438      .err08  .az     "Zero Divide"
+172D-50 72 69 6E 
      74 20 73 74 
      61 74 65 6D 
      65 6E 74 20 
      65 72 72 6F 
-     72 00          1431      .err10  .az     "Print statement error"
-172D-49 6E 76 61 
+     72 00          1439      .err10  .az     "Print statement error"
+1743-49 6E 76 61 
      6C 69 64 20 
      6C 69 6E 65 
      20 6E 75 6D 
-     62 65 72 00    1432      .err12  .az     "Invalid line number"
-1741-4D 65 6D 6F 
+     62 65 72 00    1440      .err12  .az     "Invalid line number"
+1757-4D 65 6D 6F 
      72 79 20 73 
      69 7A 65 20 
      6F 76 65 72 
-     00             1433      .err14  .az     "Memory size over"
-1752-55 6E 64 65 
+     00             1441      .err14  .az     "Memory size over"
+1768-55 6E 64 65 
      66 69 6E 65 
      64 20 6C 69 
      6E 65 20 6E 
      75 6D 62 65 
-     72 00          1434      .err16  .az     "Undefined line number"
-1768-               1435
-1768-               1436
-1768-               1437      ; ***********************************************************************
-1768-               1438      ;   デバック用ルーチン Debugging routines
-1768-               1439      ; ***********************************************************************
-1768-               1440      ; -----------------------------------------------------------------------
-1768-               1441      ; ユーザーレジスタを表示する
-1768-               1442      ; Display user registers
-1768-               1443      ; -----------------------------------------------------------------------
-1768-36             1444 ( 4) PUTUR:  psha
-1769-37             1445 ( 4)         pshb
-176A-3C             1446 ( 5)         pshx
-176B-CE 17 9E       1447 ( 3)         ldx     #:MSGUR0
-176E-BD FF AF       1448 ( 6)         jsr     write_line
-1771-DC A0          1449 ( 4)         ldd     <UR0
-1773-BD FF BB       1450 ( 6)         jsr     write_word
-1776-CE 17 A3       1451 ( 3)         ldx     #:MSGUR1
-1779-BD FF AF       1452 ( 6)         jsr     write_line
-177C-DC A2          1453 ( 4)         ldd     <UR1
-177E-BD FF BB       1454 ( 6)         jsr     write_word
-1781-CE 17 A9       1455 ( 3)         ldx     #:MSGUR2
+     72 00          1442      .err16  .az     "Undefined line number"
+177E-               1443
+177E-               1444
+177E-               1445      ; ***********************************************************************
+177E-               1446      ;   デバック用ルーチン Debugging routines
+177E-               1447      ; ***********************************************************************
+177E-               1448      ; -----------------------------------------------------------------------
+177E-               1449      ; ユーザーレジスタを表示する
+177E-               1450      ; Display user registers
+177E-               1451      ; -----------------------------------------------------------------------
+177E-36             1452 ( 4) PUTUR:  psha
+177F-37             1453 ( 4)         pshb
+1780-3C             1454 ( 5)         pshx
+1781-CE 17 B4       1455 ( 3)         ldx     #:MSGUR0
 1784-BD FF AF       1456 ( 6)         jsr     write_line
-1787-DC A4          1457 ( 4)         ldd     <UR2
+1787-DC A0          1457 ( 4)         ldd     <UR0
 1789-BD FF BB       1458 ( 6)         jsr     write_word
-178C-CE 17 AF       1459 ( 3)         ldx     #:MSGUR3
+178C-CE 17 B9       1459 ( 3)         ldx     #:MSGUR1
 178F-BD FF AF       1460 ( 6)         jsr     write_line
-1792-DC A6          1461 ( 4)         ldd     <UR3
+1792-DC A2          1461 ( 4)         ldd     <UR1
 1794-BD FF BB       1462 ( 6)         jsr     write_word
-1797-BD FF B2       1463 ( 6)         jsr     write_crlf
-179A-38             1464 ( 4)         pulx
-179B-33             1465 ( 3)         pulb
-179C-32             1466 ( 3)         pula
-179D-39             1467 ( 5)         rts
-179E-55 52 30 3D 
-     00             1468      .MSGUR0          .az     "UR0="
-17A3-20 55 52 31 
-     3D 00          1469      .MSGUR1          .az     " UR1="
-17A9-20 55 52 32 
-     3D 00          1470      .MSGUR2          .az     " UR2="
-17AF-20 55 52 33 
-     3D 00          1471      .MSGUR3          .az     " UR3="
+1797-CE 17 BF       1463 ( 3)         ldx     #:MSGUR2
+179A-BD FF AF       1464 ( 6)         jsr     write_line
+179D-DC A4          1465 ( 4)         ldd     <UR2
+179F-BD FF BB       1466 ( 6)         jsr     write_word
+17A2-CE 17 C5       1467 ( 3)         ldx     #:MSGUR3
+17A5-BD FF AF       1468 ( 6)         jsr     write_line
+17A8-DC A6          1469 ( 4)         ldd     <UR3
+17AA-BD FF BB       1470 ( 6)         jsr     write_word
+17AD-BD FF B2       1471 ( 6)         jsr     write_crlf
+17B0-38             1472 ( 4)         pulx
+17B1-33             1473 ( 3)         pulb
+17B2-32             1474 ( 3)         pula
+17B3-39             1475 ( 5)         rts
+17B4-55 52 30 3D 
+     00             1476      .MSGUR0          .az     "UR0="
+17B9-20 55 52 31 
+     3D 00          1477      .MSGUR1          .az     " UR1="
+17BF-20 55 52 32 
+     3D 00          1478      .MSGUR2          .az     " UR2="
+17C5-20 55 52 33 
+     3D 00          1479      .MSGUR3          .az     " UR3="
