@@ -1401,19 +1401,27 @@ write_err_msg:
         tst     <TabCount       ; タブ位置がゼロでなければ改行する
         beq     :1
         jsr     write_crlf
-.1      ldx     #ERRMSG
+.1      ldx     #ERRMSG1
         jsr     write_line
         tab
         ldx     #ERRCODE
         abx
         ldx     0,x
         jsr     write_line
-        jsr     write_crlf
+        tst     ExeStateFlag    ; 実行モードか？
+        bne     :2              ; No. 行番号を表示せずにスキップ
+        ldx     #ERRMSG2        ; Yes. 行番号を表示する
+        jsr     write_line
+        ldx     <ExeLineAddr
+        ldd     0,x
+        jsr     write_integer
+.2      jsr     write_crlf
         ldx     <StackPointer
         txs
         jmp     tb_main
 
-ERRMSG  .az     "ERROR: "
+ERRMSG1 .az     "Oops! "
+ERRMSG2 .az     " in "
 ERRCODE .dw     .err00
         .dw     .err02
         .dw     .err04
