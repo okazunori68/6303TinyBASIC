@@ -118,6 +118,8 @@ PrgmEndAddr     .bs     2       ; BASICプログラムの最終アドレス
 ExeStateFlag    .bs     1       ; 実行状態フラグ 0 = run, 1以上 = direct
 ExeLineAddr     .bs     2       ; 実行中の行の先頭アドレス
 ModuloMode      .bs     1       ; 剰余演算フラグ 0 = tranc, 1以上 = floor
+ToSubFlag       .bs     1       ; 分岐モードフラグ 0 = goto, 1 = gosub
+SStackPtr       .bs     2       ; サブルーチンスタック（Subroutine stack）ポインタ
 
 ; General-Purpose Registers
 UR0             *
@@ -143,6 +145,9 @@ COMPARE         .bs     6       ; 文字列比較用バッファ
 CSTACK          .bs     40      ; 計算スタック (Calculate stack)
 CSTACK_BTM      .eq     *-1
 CSTACK_SIZE     .eq     CSTACK_BTM-CSTACK+1
+SSTACK          .bs     40      ; サブルーチンスタック (Subroutine stack)
+SSTACK_BTM      .eq     *-1
+SSTACK_SIZE     .eq     SSTACK_BTM-SSTACK+1
         .or     $02c2
 VARIABLE        .bs     52      ; 変数26文字 ($01c2-01f5)
 VARIABLE_END    .eq     *-1
@@ -167,7 +172,9 @@ cold_start:
         clrb
         std     0,x             ; プログラムエリアの先頭を終端行（$0000）にする
         staa    <LineLength     ; 行の長さの上位バイトをゼロにする
+      ; // 各種フラグの初期化
         staa    <ModuloMode     ; 剰余演算をtrunc（0への切捨て除算）にする
+        staa    <ToSubFlag      ; 分岐モードを0 = gotoにする
       ; // 変数領域の初期化
         ldx     #VARIABLE
 .loop   std     0,x
@@ -175,6 +182,9 @@ cold_start:
         inx
         cpx     #VARIABLE+VARIABLE_SIZE
         bne     :loop
+      ; // スタックポインタの初期化
+        ldx     #SSTACK_BTM+1
+        stx     <SStackPtr
 
 
 tb_main:
@@ -1177,6 +1187,18 @@ exe_if: jsr     skip_space      ; 空白を読み飛ばし
 
 
 ; -----------------------------------------------------------------------
+; gosub文を実行する
+; Execute 'gosub' statement
+;【引数】X:実行位置アドレス
+;【使用】A, B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_gosub:
+        oim     #1,<ToSubFlag   ; 分岐モードを1 = gosubにする
+        ; そのままexe_gotoに続く
+
+
+; -----------------------------------------------------------------------
 ; goto文を実行する
 ; Execute 'goto' statement
 ;【引数】X:実行位置アドレス
@@ -1190,7 +1212,22 @@ exe_goto:
         bcc     :err04          ; "Illegal expression"
         bmi     :err12          ; "Invalid line number"
         std     <LineNumber     ; 飛び先になる行番号を一時保存
-        ldx     <ExeLineAddr    ; X <- 実行中の行の先頭アドレス
+        tst     ToSubFlag
+        beq     :to             ; 分岐モードが0=gotoなら:toへ
+        xgdx                    ; D = ExePointer
+        ldx     <SStackPtr      ; サブルーチンスタックポインタ代入
+        cpx     #SSTACK         ; 既にスタック最上位か？
+        beq     :err18          ; Yes. "Subroutine stack overflow"
+        dex
+        dex
+        std     0,x             ; ExePointerをスタックに積む
+        ldd     <ExeLineAddr
+        dex
+        dex
+        std     0,x             ; ExeLineAddrをスタックに積む
+        stx     <SStackPtr      ; サブルーチンスタックポインタ退避
+        clr     ToSubFlag       ; 分岐モードを0 = gotoに戻す
+.to     ldx     <ExeLineAddr    ; X <- 実行中の行の先頭アドレス
         ldd     0,x             ; 今実行している行の行番号を取得
         xgdx
         cpx     <LineNumber     ; 現在の行番号と飛び先の行番号を比較
@@ -1212,6 +1249,34 @@ exe_goto:
 .err12  ldaa    #12             ; "Invalid line number"
         jmp     write_err_msg
 .err16  ldaa    #16             ; "Undefined line number"
+        jmp     write_err_msg
+.err18  ldaa    #18             ; "Subroutine stack overflow"
+        jmp     write_err_msg
+
+
+; -----------------------------------------------------------------------
+; return文を実行する
+; Execute 'return' statement
+;【引数】X:実行位置アドレス
+;【使用】A, B, X
+;【返値】なし
+; -----------------------------------------------------------------------
+exe_return:
+        ldx     <SStackPtr      ; サブルーチンスタックポインタ代入
+        cpx     #SSTACK_BTM+1   ; 既にスタックの底か？
+        beq     :err20          ; Yes. "Return without gosub"
+        ldd     0,x
+        std     <ExeLineAddr    ; ExeLineAddrをスタックから復帰
+        inx
+        inx
+        ldd     0,x             ; D = ExePointer
+        inx
+        inx
+        stx     <SStackPtr      ; サブルーチンスタックポインタ退避
+        xgdx                    ; X = ExePointer
+        jmp     is_multi
+
+.err20  ldaa    #20             ; "Return without gosub"
         jmp     write_err_msg
 
 
@@ -1375,10 +1440,18 @@ SMT_TABLE
                 .db     2
                 .dw     exe_if
                 .az     "if"
-.goto           .dw     :trunc
+.goto           .dw     :gosub
                 .db     4
                 .dw     exe_goto
                 .az     "goto"
+.gosub          .dw     :return
+                .db     5
+                .dw     exe_gosub
+                .az     "gosub"
+.return         .dw     :trunc
+                .db     6
+                .dw     exe_return
+                .as     "return"        ; 6文字なので終端不要。'.as'を使用する
 .trunc          .dw     :floor
                 .db     5
                 .dw     exe_trunc
@@ -1431,6 +1504,8 @@ ERRCODE .dw     .err00
         .dw     .err12
         .dw     .err14
         .dw     .err16
+        .dw     .err18
+        .dw     .err20
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
@@ -1440,6 +1515,8 @@ ERRCODE .dw     .err00
 .err12  .az     "Invalid line number"
 .err14  .az     "Memory size over"
 .err16  .az     "Undefined line number"
+.err18  .az     "Subroutine stack overflow"
+.err20  .az     "Return without gosub"
 
 
 ; ***********************************************************************

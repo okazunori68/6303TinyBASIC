@@ -36,6 +36,12 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 - goto文
   - `goto 行番号または式`
   - 指定した、または数式評価された行番号に実行を移します
+- gosub文
+  - `gosub 行番号または式`
+  - 行番号または式で指定したサブルーチンを呼び出します
+- return文
+  - パラメータはありません
+  - 呼び出したgosub文の直後に実行を移します
 - trunc文
   - パラメータはありません。剰余演算を「0への切捨て除算」に設定します
   - 0への切捨て除算はCやGO、Swift、MSX-BASICなど大半の言語で使われている方法です
@@ -55,6 +61,11 @@ SBC6303を起動し、プログラム（tinybasic.s19）を'l'コマンドで読
 XON/XOFFフロー制御を実装しています。  
 ターミナルソフトのソフトウェアフロー制御を有効にしてください。  
 テキスト貼り付け時の遅延は不要です
+
+<img src="https://user-images.githubusercontent.com/71197813/222955274-b7882104-1cb3-44aa-a13e-ca898f8a2c41.png" width="500">
+<img src="https://user-images.githubusercontent.com/71197813/222955303-f1ad71e8-6ac7-4971-a552-dbfc27dbfb9d.png" width="500">
+<img src="https://user-images.githubusercontent.com/71197813/222435459-4208a819-0e17-4004-9b11-5b69cd56a0ba.png">
+<img src="https://user-images.githubusercontent.com/71197813/222435482-cddbb36f-da3f-491e-a950-f9972f95333c.png">
 
 ## 開発環境
 - macOS Monterey
