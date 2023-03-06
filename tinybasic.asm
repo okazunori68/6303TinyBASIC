@@ -231,7 +231,7 @@ edit_mode:
         inx
         ldab    <LineLength+1   ; 行の長さを取得
         stab    0,x
-      ; // mem_copyの引数を設定
+      ; // mem_moveの引数を設定
         inx
         stx     <Destination    ; 転送先アドレス（行の長さの直後）を設定
         clra                    ; LineLengthの上位バイトをゼロにする
@@ -239,7 +239,7 @@ edit_mode:
         std     <Bytes          ; 転送バイト数を設定
         ldd     <ExePointer     ; 行番号の直後を指しているバッファアドレスを復帰
         std     <Source         ; 転送元アドレスを設定
-        jsr     mem_copy
+        jsr     mem_move
       ; // 終端行の挿入
         ldx     <PrgmEndAddr
         clra
@@ -1306,14 +1306,14 @@ exe_floor:
 
 ; ------------------------------------------------
 ; ブロック転送
-; Copy memory
+; Move memory
 ;【引数】Source:転送元アドレス
 ;        Destination:転送先アドレス
 ;        Bytes:転送バイト数
 ;【使用】A, B, X, R0
 ;【返値】なし
 ; ------------------------------------------------
-mem_copy:
+mem_move:
 .Offset .eq     UR0
         ldd     <Bytes
         beq     :end            ; 転送バイト数が0ならば即終了
