@@ -1310,40 +1310,108 @@ exe_floor:
 ;【引数】Source:転送元アドレス
 ;        Destination:転送先アドレス
 ;        Bytes:転送バイト数
-;【使用】A, B, X, R0
+;【使用】A, B, X, UR0
 ;【返値】なし
 ; ------------------------------------------------
 mem_move:
-.Offset .eq     UR0
         ldd     <Bytes
         beq     :end            ; 転送バイト数が0ならば即終了
-      ; // オフセットの計算
-        ldd     <Destination    ; dst - src
-        subd    <Source
-        std     <:Offset        ; offset = dst - src
-      ; // 終了判定用のアドレスを計算
         ldd     <Source
-        addd    <Bytes          ; src + bytes = 転元終了アドレス
-        std     <Destination    ; 転送終了アドレスを代入
+        subd    <Destination    ; Source - Destination
+        beq     :end            ; 転送元と転送先が同じなら即終了
+        bcc     LDIR            ; Source > Destination
+        bra     LDDR            ; Source < Destination
+.end    rts
+
+; ------------------------------------------------
+; 前方から転送（LDIR）
+; Load, Increment and Repeat
+;【引数】Source:転送元アドレス
+;        Destination:転送先アドレス
+;        Bytes:転送バイト数
+;【使用】A, B, X, UR0
+;【返値】なし
+; ------------------------------------------------
+LDIR:
+.Offset .eq     UR0
+       ; // オフセットの計算。既にDレジスタに入っている
+       std     <:Offset        ; Offset = Source - Destination
+      ; // 終了判定用のアドレスを計算
+        ldd     <Source         ; 転送終了アドレス = Source - Bytes
+        addd    <Bytes
+        std     <Destination    ; 転送終了アドレスをDestinationに代入
       ; // 転送開始
-        ldx     <Source         ; 転送開始アドレスを代入
+        ldx     <Source         ; 転送開始アドレスをXに代入
+      ; // 転送するバイト数が奇数か偶数か判断。
+      ; // 奇数ならByte転送x1 + Word転送、偶数ならWord転送
+        ldd     <Bytes
+        lsrd                    ; 転送バイト数 / 2, 奇数ならC=1
+        bcc     :loop           ; 偶数ならWord転送へ
+      ; // Byte転送
+        ldaa    0,x             ; A <- [Source]
+        xgdx                    ; D = address, X = data
+        subd    <:Offset        ; Source - Offset = Destination
+        xgdx                    ; D = data, X = address
+        staa    0,x             ; [Destination] <- A
+        xgdx                    ; D = address, X = data
+        addd    <:Offset        ; Destination + Offset = Source
+        xgdx                    ; D = data, X = address
+        bra     :odd            ; 飛び先でinx
+      ; // Word転送
+.loop   ldd     0,x
+        xgdx
+        subd    <:Offset
+        xgdx
+        std     0,x
+        xgdx
+        addd    <:Offset
+        xgdx
+        inx
+.odd    inx
+        cpx     <Destination    ; 転送終了アドレスと現在のアドレスを比較
+        bne     :loop
+        rts
+
+; ------------------------------------------------
+; 後方から転送（LDDR）
+; Load, Decrement and Repeat
+;【引数】Source:転送元アドレス
+;        Destination:転送先アドレス
+;        Bytes:転送バイト数
+;【使用】A, B, X, UR0
+;【返値】なし
+; ------------------------------------------------
+LDDR:
+.Offset .eq     UR0
+      ; // オフセットの計算
+        ldd     <Destination
+        subd    <Source
+        std     <:Offset         ; Offset = Destination - Source
+      ; // 転送終了アドレスは既にDestinationに代入済み
+      ; // 転送開始アドレスの計算。一番後ろから
+        ldd     <Source         ; 転送開始アドレス = Source + Bytes
+        addd    <Bytes
+        xgdx                    ; X = 転送開始アドレス
       ; // 転送するバイト数が奇数か偶数か判断。
       ; // 奇数ならByte転送x1 + Word転送、偶数ならWord転送
         ldd     <Bytes
         lsrd                    ; Bytes / 2, 奇数ならC=1
         bcc     :loop           ; 偶数ならWord転送へ
       ; // Byte転送
-        ldaa    0,x             ; A <- [source]
+        dex
+        ldaa    0,x             ; A <- [Source]
         xgdx                    ; D = address, X = data
-        addd    <:Offset        ; src - offset = dst
+        addd    <:Offset        ; Source + Offset = Destination
         xgdx                    ; D = data, X = address
-        staa    0,x             ; [dst] <- A
+        staa    0,x             ; [Destination] <- A
         xgdx                    ; D = address, X = data
-        subd    <:Offset        ; dst + offset = src
+        subd    <:Offset        ; Destination - Offset = Source
         xgdx                    ; D = data, X = address
         bra     :odd
       ; // Word転送
-.loop   ldd     0,x
+.loop   dex
+        dex
+        ldd     0,x
         xgdx
         addd    <:Offset
         xgdx
@@ -1351,11 +1419,9 @@ mem_move:
         xgdx
         subd    <:Offset
         xgdx
-        inx
-.odd    inx
-        cpx     <Destination    ; 転送終了アドレスと現在のアドレスを比較
+.odd    cpx     <Source         ; 転送終了アドレスと現在のアドレスを比較
         bne     :loop
-.end    rts
+        rts
 
 
 ; -----------------------------------------------------------------------
