@@ -201,53 +201,207 @@ tb_main:
 .err12  ldaa    #12             ; "Invalid line number"
         jmp     write_err_msg
 
+; 実行モード（ダイレクトモード）
 execute_mode:
         jmp     exe_line
 
+; 行編集モード
+; 空行か否か、空行でなければ同じ行番号か否かで処理を振り分ける
 edit_mode:
         stx     <ExePointer     ; バッファアドレスを保存（行番号の直後を指している）
         std     <LineNumber     ; 行番号を保存
-      ; // 行の長さを取得
+      ; // 空行チェック
+        jsr     skip_space
+        bne     :1
+        bra     delete_line     ; 空行だったら削除ルーチンへ
+.1    ; // 入力行の長さチェック（Aレジスタに文字数）
+        ldx     <ExePointer     ; バッファアドレスを復帰
         ldaa    #4              ; 行の長さの初期値（2+1+n+1, n=0）
 .loop   ldab    0,x
-        beq     :1
+        beq     :2
         inca                    ; 行の長さを+1
         inx                     ; バッファアドレスを+1
         bra     :loop
-.1      staa    <LineLength+1   ; 行の長さをLineLengthの下位バイトに保存
-      ; // 転送の準備
-        ldx     <PrgmEndAddr    ; X <- プログラムの最終アドレス
-        ldd     <PrgmEndAddr 
-        addd    <LineLength     ; D <- 行の長さを足した最終アドレス
-        xgdx
-        cpx     #USER_AREA_BTM  ; ユーザーエリアを超えていないかチェック
-        xgdx
-        bcc     :err14          ; "Memory size over"
-        std     <PrgmEndAddr    ; 新しい最終アドレスを設定
-      ; // 行番号と行の長さを転送
-        ldd     <LineNumber     ; 行番号を取得
-        std     0,x
-        inx
-        inx
-        ldab    <LineLength+1   ; 行の長さを取得
-        stab    0,x
-      ; // mem_moveの引数を設定
-        inx
-        stx     <Destination    ; 転送先アドレス（行の長さの直後）を設定
-        clra                    ; LineLengthの上位バイトをゼロにする
-        subb    #3              ; LineLengthから行番号・行の長さの3バイト分を引く
-        std     <Bytes          ; 転送バイト数を設定
-        ldd     <ExePointer     ; 行番号の直後を指しているバッファアドレスを復帰
-        std     <Source         ; 転送元アドレスを設定
+.2      staa    <LineLength+1   ; 行の長さをLineLengthの下位バイトに保存
+      ; // 同じ行があるかどうか確認
+        ldx     #USER_AREA_TOP  ; X:プログラム開始アドレス
+        jsr     scan_line_num   ; 行番号検索
+        stx     <ExeLineAddr    ; 検索した行アドレスをExeLineAddrに退避しておく
+        bcc     not_same_line_num
+        jmp     same_line_num
+
+; 一行削除
+delete_line:
+        ldx     #USER_AREA_TOP  ; X:プログラム開始アドレス
+        jsr     scan_line_num   ; 行番号検索
+        bcc     :end            ; 同じ行がなければ何もしない
+      ; // 転送先アドレスの設定（既存の行の先頭アドレス）
+        stx     <Destination
+      ; // 転送元アドレスの設定（次の行の先頭アドレス）
+        ldab    2,x
+        stab    <LineLength+1   ; 行の長さをLineLengthの下位バイトに保存しておく
+        abx
+        stx     <Source
+      ; // 転送バイト数の設定（プログラム終端アドレス - 次の行の先頭アドレス + 2）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        subd    <Source         ; - 次の行の先頭アドレス
+        addd    #2              ; + 2
+        std     <Bytes
+      ; // ブロック転送
         jsr     mem_move
+      ; // 新しいプログラム終端アドレスの設定（プログラム終端アドレス - 行の長さ）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        subd    <LineLength     ; - 行の長さ
+        std     <PrgmEndAddr
+.end    jmp     tb_main
+
+; 同じ行番号がなかった場合の処理
+not_same_line_num:
+      ; // D:次に大きな行番号 X:次に大きな行の先頭アドレス
+        subd    #0              ; tstd
+        beq     :add            ; 最終行より後ろ（D=$0000）だったら入力行挿入
+      ; // 新しいプログラム終端アドレスの設定（プログラム終端アドレス + 行の長さ）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        addd    <LineLength     ; + 行の長さ
+        bsr     check_pgrm_end
+        std     <PrgmEndAddr
+      ; // 転送元アドレスの設定（次に大きな行の先頭アドレス）
+        stx     <Source
+      ; // 転送先アドレスの設定（次に大きな行の先頭アドレス + 行の長さ）
+        ldab    <LineLength+1   ; 行の長さ
+        abx                     ; + 次に大きな行の先頭アドレス
+        stx     <Destination
+      ; // 転送バイト数の設定（プログラム終端アドレス - 次に大きな行の先頭アドレス + 2）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        subd    <Source         ; - 次に大きな行の先頭アドレス
+        addd    #2              ; + 2
+        std     <Bytes
+      ; // ブロック転送
+        jsr     mem_move
+      ; // 入力行の挿入
+        ldx     <ExeLineAddr    ; 検索した行アドレスを復帰
+        bsr     insert_new_line
+        jmp     tb_main
+.add
+      ; // D:$0000 X:プログラム終端アドレス
+      ; // 新しいプログラム終端アドレスの設定（プログラム終端アドレス + 行の長さ）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        addd    <LineLength     ; + 行の長さ
+        bsr     check_pgrm_end
+        std     <PrgmEndAddr
+      ; // 入力行の挿入
+        bsr     insert_new_line
       ; // 終端行の挿入
         ldx     <PrgmEndAddr
         clra
         clrb
         std     0,x             ; プログラムの最終アドレスに$0000を加える
         jmp     tb_main
+
+; 入力行の転送
+insert_new_line:
+        ldd     <LineNumber     ; 行番号を転送
+        std     0,x
+        inx
+        inx
+        ldab    <LineLength+1   ; 行の長さを転送
+        stab    0,x
+        inx
+      ; // 転送先アドレスの設定（現在の位置）
+        stx     <Destination
+      ; // 転送バイト数の設定（行の長さ - 3（行番号 - 長さ））
+        clra                    ; 行の長さ（A=0,B=下位8bit）
+        subb    #3              ; - 3
+        std     <Bytes
+      ; // 転送元アドレスの設定（入力された行）
+        ldd     <ExePointer     ; バッファアドレスを復帰（行番号の直後を指している）
+        std     <Source
+      ; // ブロック転送
+        jmp     mem_move        ; 飛び先でrts
+
+; プログラムエリアを超えていないか確認
+check_pgrm_end:
+        xgdx
+        cpx     #USER_AREA_BTM
+        xgdx
+        bcc     :err14
+        rts
 .err14  ldaa    #14              ; "Memory size over"
         jmp     write_err_msg
+
+; 同じ行番号があった場合、既存の行との長さの差で処理を振り分ける
+same_line_num:
+      ; // D:行番号 X:既存の行の開始アドレス
+        ldaa    <LineLength+1   ; 入力行の長さを取得
+        suba    2,x             ; **Aレジスタ** = 入力行の長さ - 既存行の長さ
+        bmi     short_length    ; 入力行の長さ < 既存行の長さ
+        beq     same_length     ; 入力行の長さ = 既存行の長さ
+
+; 入力行が既存の行より長い場合
+long_length:                    ; 入力行の長さ > 既存行の長さ
+      ; // 転送元アドレスの設定（次の行の先頭アドレス）
+        ldab    2,x
+        abx
+        stx     <Source
+      ; // 転送先アドレスの設定（次の行の先頭アドレス + 入力行の長さ - 既存行の長さ）
+        tab                     ; B <- A（入力行の長さ - 既存行の長さ）
+        clra
+        std     <UR1            ; 入力行の長さ - 既存行の長さを後で使うためにUR1に保存
+        abx                     ; 次の行の先頭アドレス + （入力行の長さ - 既存行の長さ）
+        stx     <Destination
+      ; // 転送バイト数の設定（プログラム終端アドレス - 次に大きな行の先頭アドレス + 2）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        subd    <Source         ; - 次に大きな行の先頭アドレス
+        addd    #2              ; + 2
+        std     <Bytes
+      ; // 新しいプログラム終端アドレスの設定
+      ; // （プログラム終端アドレス + 入力行の長さ - 既存行の長さ）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        addd    <UR1            ; + 入力行の長さ - 既存行の長さ
+        bsr     check_pgrm_end
+        std     <PrgmEndAddr
+      ; // ブロック転送
+        jsr     mem_move
+      ; // 入力行の挿入
+        ldx     <ExeLineAddr    ; 検索した行アドレスを復帰
+        bsr     insert_new_line
+        jmp     tb_main
+
+; 入力行と既存の行が同じ長さの場合
+same_length:
+        bsr     insert_new_line
+        jmp     tb_main
+
+; 入力行が既存の行より短い場合
+short_Length:
+      ; // 転送元アドレスの設定（次の行の先頭アドレス）
+        ldab    2,x
+        abx
+        stx     <Source
+      ; // 転送先アドレスの設定（次の行の先頭アドレス - 既存行の長さ + 入力行の長さ）
+        tab                     ; B <- A（入力行の長さ - 既存行の長さ）
+        negb                    ; 絶対値にする
+        clra
+        std     <UR1            ; 既存行の長さ - 入力行の長さ
+        xgdx
+        subd    <UR1            ; 次の行の先頭アドレス - （既存行の長さ - 入力行の長さ）
+        std     <Destination
+      ; // 転送バイト数の設定（プログラム終端アドレス - 次に大きな行の先頭アドレス + 2）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        subd    <Source         ; - 次に大きな行の先頭アドレス
+        addd    #2              ; + 2
+        std     <Bytes
+      ; // ブロック転送
+        jsr     mem_move
+      ; // 新しいプログラム終端アドレスの設定
+      ; // （プログラム終端アドレス - 既存行の長さ + 入力行の長さ）
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        subd    <UR1            ; - （既存行の長さ - 入力行の長さ）
+        std     <PrgmEndAddr
+      ; // 入力行の挿入
+        ldx     <ExeLineAddr    ; 検索した行アドレスを復帰
+        bsr     insert_new_line
+        jmp     tb_main
 
 
 ; -----------------------------------------------------------------------
