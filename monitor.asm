@@ -18,6 +18,13 @@
         .in     ./HD6303R_chip.def
 
 ; ***********************************************************************
+;   設定値 Parameters
+; ***********************************************************************
+BIT_RATE        .eq     1       ; 0 = 9,600bps, 1 = 76,800bps
+XON_TRIG        .eq     8      ; XONを送信する閾値
+XOFF_TRIG       .eq     16      ; XOFFを送信する閾値
+
+; ***********************************************************************
 ;   定数 Constants
 ; ***********************************************************************
 NUL             .eq     $00     ; NUL
@@ -89,7 +96,11 @@ init_sbc6303:
       ; // 内蔵RAM無効
         aim     #~RAME,<RAMCR
       ; // SCI設定
+        .do     BIT_RATE=1
+        ldab    #E16|NRZIN      ; 76,800bps
+        .el
         ldab    #E128|NRZIN     ; 9,600bps
+        .fi
         stab    <RMCR
         ldab    #TE|RE|RIE      ; SCIおよび受信割り込み有効化
         stab    <TRCSR
@@ -394,7 +405,7 @@ rx_interrupt:
       ; // リングバッファの残りの確認
         incb                            ; データ数 +1
         stab    <RxBffrQty
-        cmpb    #Rx_BFFR_SIZE-16        ; リングバッファの残りバイトは16以下か？
+        cmpb    #Rx_BFFR_SIZE-XOFF_TRIG ; バッファの残りバイトがXOFF_TRIGに達した？
         bne     :write                  ; No. データ書き込み
         ldab    #XOFF                   ; Yes. XOFF送出
         jsr     write_char
@@ -404,8 +415,7 @@ rx_interrupt:
         inx
         xgdx                            ; Ring buffer write pointer の下位8bitを$39でマスク
         andb    #Rx_BFFR_SIZE-1
-        xgdx
-        stx     <RxBffrWritePtr
+        std     <RxBffrWritePtr
 .end    rti
 
 ; ***********************************************************************
@@ -428,7 +438,7 @@ read_char:
         decb                            ; データ数 -1
         stab    <RxBffrQty
         cli
-        cmpb    #16                     ; リングバッファのデータ数は16以下か？
+        cmpb    #XON_TRIG               ; バッファのデータ数がXON_TRIGまで減った？
         bne     :read                   ; No. データ書き込み
         ldab    #XON                    ; Yes. XON送出
         bsr     write_char
