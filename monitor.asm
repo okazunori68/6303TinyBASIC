@@ -423,8 +423,11 @@ read_char:
         pshx
 .loop   ldab    <RxBffrQty              ; データ数が1以上になるまでループ
         beq     :loop
+        sei
+        ldab    <RxBffrQty              ; 再度データ数を読み込み
         decb                            ; データ数 -1
         stab    <RxBffrQty
+        cli
         cmpb    #16                     ; リングバッファのデータ数は16以下か？
         bne     :read                   ; No. データ書き込み
         ldab    #XON                    ; Yes. XON送出
