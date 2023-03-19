@@ -120,6 +120,8 @@ ExeLineAddr     .bs     2       ; 実行中の行の先頭アドレス
 ModuloMode      .bs     1       ; 剰余演算フラグ 0 = tranc, 1以上 = floor
 ToSubFlag       .bs     1       ; 分岐モードフラグ 0 = goto, 1 = gosub
 SStackPtr       .bs     2       ; サブルーチンスタック（Subroutine stack）ポインタ
+ArrayAddr       .bs     2       ; 配列変数の先頭アドレス
+MaxSubscript    .bs     2       ; 配列の最大添字数
 
 ; General-Purpose Registers
 UR0             *
@@ -182,6 +184,12 @@ cold_start:
         inx
         cpx     #VARIABLE+VARIABLE_SIZE
         bne     :loop
+      ; // 配列変数の初期化
+        ldd     #USER_AREA_TOP+2
+        std     <ArrayAddr
+        ldd     #USER_AREA_BTM+2-USER_AREA_TOP
+        lsrd
+        std     <MaxSubscript
       ; // スタックポインタの初期化
         ldx     #SSTACK_BTM+1
         stx     <SStackPtr
@@ -253,7 +261,7 @@ delete_line:
         ldd     <PrgmEndAddr    ; プログラム終端アドレス
         subd    <LineLength     ; - 行の長さ
         std     <PrgmEndAddr
-.end    jmp     tb_main
+.end    jmp     array_index
 
 ; 同じ行番号がなかった場合の処理
 not_same_line_num:
@@ -281,7 +289,7 @@ not_same_line_num:
       ; // 入力行の挿入
         ldx     <ExeLineAddr    ; 検索した行アドレスを復帰
         bsr     insert_new_line
-        jmp     tb_main
+        jmp     array_index
 .add
       ; // D:$0000 X:プログラム終端アドレス
       ; // 新しいプログラム終端アドレスの設定（プログラム終端アドレス + 行の長さ）
@@ -296,7 +304,7 @@ not_same_line_num:
         clra
         clrb
         std     0,x             ; プログラムの最終アドレスに$0000を加える
-        jmp     tb_main
+        jmp     array_index
 
 ; 入力行の転送
 insert_new_line:
@@ -365,7 +373,7 @@ long_length:                    ; 入力行の長さ > 既存行の長さ
       ; // 入力行の挿入
         ldx     <ExeLineAddr    ; 検索した行アドレスを復帰
         bsr     insert_new_line
-        jmp     tb_main
+        bra     array_index
 
 ; 入力行と既存の行が同じ長さの場合
 same_length:
@@ -401,6 +409,15 @@ short_Length:
       ; // 入力行の挿入
         ldx     <ExeLineAddr    ; 検索した行アドレスを復帰
         bsr     insert_new_line
+
+array_index:
+        ldd     <PrgmEndAddr    ; プログラム終端アドレス
+        addd    #2              ; + 2
+        std     <ArrayAddr      ; 配列変数の先頭アドレス
+        ldd     #USER_AREA_BTM+2
+        subd    <ArrayAddr
+        lsrd
+        std     <MaxSubscript
         jmp     tb_main
 
 
@@ -455,12 +472,31 @@ eol_process:
 exe_line:
         jsr     skip_space
         beq     eol_process     ; 終端文字（$00）ならば終了処理
-      ; // 代入文のチェック
-        jsr     is_variable     ; 変数か？
+      ; // 配列変数のチェック
+        cmpb    #'@'
+        bne     :var            ; 配列変数でなければ変数のチェックへ
+        ldab    1,x
+        cmpb    #'('            ; 直後の文字は'('？
+        bne     :err00          ; No. "Syntax error"
+        inx                     ; 実行位置ポインタを'('の直後に
+        inx
+        jsr     eval_expression ; 添字を取得する
+        bcc     :err04
+      ; // ')'の確認
+        pshb                    ; 添字の下位8bitを退避
+        ldab    0,x
+        cmpb    #')'
+        bne     :err00
+        pulb                    ; 添字の下位8bitを復帰
+        inx                     ; 実行位置ポインタを')'の直後に
+        jsr     set_array_addr  ; 配列変数アドレスの取得
+        bra     :let
+.var    jsr     is_variable     ; 変数か？
         bcc     :cmd            ; No. テーブル検索へ
         ldaa    #VARIABLE>>8    ; Yes. A = 変数領域の上位バイト
         aslb                    ; B = 変数領域の下位バイト
-        std     <VariableAddr   ; 変数アドレスを保存
+.let    std     <VariableAddr   ; 変数アドレスを保存
+      ; // 代入文のチェック
         jsr     skip_space      ; Yes. 代入文か？
         cmpb    #'='
         bne     :err00          ; No. エラー処理へ
@@ -482,6 +518,8 @@ exe_line:
 .1      ldx     #SMT_TABLE
 .2      jsr     search_table    ; テーブル検索実行
 .err00  clra                    ; search_tableから戻ってくるということは"Syntax error"
+        jmp     write_err_msg
+.err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
 
 
@@ -602,8 +640,31 @@ expr_1st:
 .X      .eq     UR3
         jsr     skip_space
         jsr     get_int_from_decimal ; 数字チェックと取得
-        bcc     :var            ; 数字でなければ変数のチェックへ
+        bcc     :array          ; 数字でなければ配列変数のチェックへ
         bra     :push           ; 数字であればスタックにプッシュ
+.array  cmpb    #'@'
+        bne     :var            ; 配列変数でなければ変数のチェックへ
+        ldab    1,x
+        cmpb    #'('            ; 直後の文字は'('？
+        bne     :err00          ; No. "Syntax error"
+        inx                     ; 実行位置ポインタを'('の直後に
+        inx
+        jsr     expr_4th        ; 添字を取得する
+      ; // ')'の確認
+        cmpb    #')'
+        bne     :err00
+        pshx                    ; 実行位置アドレスを退避
+        ldx     <CStackPtr
+        ldd     0,x             ; 添字の取得
+        inx
+        inx
+        stx     <CStackPtr
+        jsr     set_array_addr  ; 配列変数アドレスの取得
+        xgdx                    ; X = 配列変数のアドレス
+        ldd     0,x             ; 配列変数値を取得
+        pulx                    ; 実行位置アドレスを復帰
+        inx                     ; 実行位置ポインタを')'の直後に
+        bra     :push
 .var    jsr     is_variable     ; 変数か？
         bcc     :paren          ; 変数でなければカッコのチェックへ
       ; // 変数値の取得
@@ -638,6 +699,8 @@ expr_1st:
         ldx     <:X
         clc                     ; false:C=0
         rts
+.err00  clra                    ; "Syntax error"
+        jmp     write_err_msg
 .err06  ldaa    #6              ; "Calculate stack overflow"
         jmp     write_err_msg
 
@@ -1137,6 +1200,27 @@ write_tab:
         tim     #7,<TabCount
         bne     :top
         rts
+
+
+; -----------------------------------------------------------------------
+; 配列変数のアドレスを取得する
+; Set the address of the array variable
+;【引数】D:添字
+;【使用】A, B
+;【返値】D:配列変数のアドレス
+; -----------------------------------------------------------------------
+set_array_addr:
+        xgdx
+        cpx     <MaxSubscript   ; 取得した添字 > 添字の最大値？
+        bhi     :err22          ; Yes. エラー処理
+        xgdx
+        asld                    ; 添字を2倍にする
+        addd    <ArrayAddr
+        rts
+.err00  clra                    ; "Syntax error"
+        jmp     write_err_msg
+.err22  ldaa    #22             ; "Subscript is out of range"
+        jmp     write_err_msg
 
 
 ; -----------------------------------------------------------------------
@@ -1726,6 +1810,7 @@ ERRCODE .dw     .err00
         .dw     .err16
         .dw     .err18
         .dw     .err20
+        .dw     .err22
 .err00  .az     "Syntax error"
 .err02  .az     "Out of range value"
 .err04  .az     "Illegal expression"
@@ -1737,6 +1822,7 @@ ERRCODE .dw     .err00
 .err16  .az     "Undefined line number"
 .err18  .az     "Subroutine stack overflow"
 .err20  .az     "Return without gosub"
+.err22  .az     "Subscript is out of range"
 
 
 ; ***********************************************************************
