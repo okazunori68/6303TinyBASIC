@@ -122,6 +122,7 @@ ToSubFlag       .bs     1       ; 分岐モードフラグ 0 = goto, 1 = gosub
 SStackPtr       .bs     2       ; サブルーチンスタック（Subroutine stack）ポインタ
 ArrayAddr       .bs     2       ; 配列変数の先頭アドレス
 MaxSubscript    .bs     2       ; 配列の最大添字数
+RndNumber       .bs     2       ; 乱数値
 
 ; General-Purpose Registers
 UR0             *
@@ -193,6 +194,10 @@ cold_start:
       ; // スタックポインタの初期化
         ldx     #SSTACK_BTM+1
         stx     <SStackPtr
+      ; // 乱数のSeed値の設定
+.seed   ldd     <FRC            ; Free run timer 読み出し
+        beq     :seed           ; Seedはゼロ以外
+        std     <RndNumber
 
 
 tb_main:
@@ -666,7 +671,7 @@ expr_1st:
         inx                     ; 実行位置ポインタを')'の直後に
         bra     :push
 .var    jsr     is_variable     ; 変数か？
-        bcc     :paren          ; 変数でなければカッコのチェックへ
+        bcc     :func           ; 変数でなければカッコのチェックへ
       ; // 変数値の取得
         pshx                    ; 実行位置アドレスを退避
         ldaa    #VARIABLE>>8    ; A = 変数領域の上位バイト
@@ -675,6 +680,16 @@ expr_1st:
         ldd     0,x             ; D <- 変数の値
         pulx                    ; 実行位置アドレスを復帰
         bra     :push           ; 変数の値をスタックにプッシュ
+.func   ldd     0,x             ; 6文字を文字列比較用バッファに転送しておく
+        std     <COMPARE
+        ldd     2,x
+        std     <COMPARE+2
+        ldd     4,x
+        std     <COMPARE+4
+        stx     <ExePointer     ; 実行位置アドレスを退避
+        ldx     #FUNC_TABLE
+        jsr     search_table    ; テーブル検索実行。飛び先でrts
+        ldab    0,x             ; 該当関数がなかった場合はもう一度文字を読み込む
 .paren  cmpb    #'('
         bne     :err
         inx
@@ -1277,6 +1292,10 @@ scan_line_num:
 ;【返値】なし
 ; -----------------------------------------------------------------------
 exe_run:
+      ; // 乱数のSeed値の設定
+.seed   ldd     <FRC            ; Free run timer 読み出し
+        beq     :seed           ; Seedはゼロ以外
+        std     <RndNumber
       ; // 変数領域の初期化
         ldx     #VARIABLE
         clra
@@ -1542,6 +1561,58 @@ exe_floor:
         jmp     is_multi
 
 
+; -----------------------------------------------------------------------
+; rnd関数を実行する
+; Execute 'rnd' function
+;【引数】X:実行位置アドレス
+;【使用】A, B, X
+;【返値】D:乱数値 X:次の実行位置アドレス
+; -----------------------------------------------------------------------
+exe_rnd:
+      ; // xorshiftで乱数生成
+        ldab    <RndNumber
+        lsrb
+        ldab    <RndNumber+1
+        rorb
+        eorb    <RndNumber
+        stab    <RndNumber
+        rorb
+        eorb    <RndNumber+1
+        stab    <RndNumber+1
+        tba
+        eora    <RndNumber
+        staa    <RndNumber
+        anda    #$7f            ; 生成される乱数は0〜32,767となる
+        jsr     expr_1st:push   ; 乱数を計算スタックにプッシュ
+        jsr     expr_4th        ; 引数を取得する
+      ; // ')'の確認
+        cmpb    #')'
+        bne     :err00
+        pshx                    ; 実行位置アドレスを退避
+      ; // 計算スタックの引数を+1する
+        ldx     <CStackPtr
+        ldd     0,x
+        ble     :err02          ; 引数が正の実数でなければ"Out of range"
+        addd    #1
+        std     0,x
+        stx     <CStackPtr
+      ; // rnd(32768)の場合、生成された乱数を32768+1つまり-32768で割らないといけない
+      ; // 結果を正の数とするために一時的にtruncモードにする
+        ldab    <ModuloMode     ; 剰余演算フラグを保存
+        pshb
+        clr     ModuloMode      ; 剰余演算フラグをtrancにする
+        jsr     CS_mod          ; 乱数 / (引数 + 1)
+        pulb                    ; 剰余演算フラグを復帰
+        stab    <ModuloMode
+        pulx                    ; 実行位置アドレスを復帰
+        inx                     ; 次の実行位置アドレスに
+        rts                     ; expr_2ndの2行目に戻る
+.err00  clra                    ; "Syntax error"
+        jmp     write_err_msg
+.err02  ldaa    #2              ; "Out of range"
+        jmp     write_err_msg
+
+
 ; ------------------------------------------------
 ; ブロック転送
 ; Move memory
@@ -1764,6 +1835,13 @@ SMT_TABLE
                 .db     5
                 .dw     exe_floor
                 .az     "floor"
+.bottom         .dw     $0000           ; リンクポインタ$0000はテーブルの終端
+
+FUNC_TABLE
+.rnd            .dw     :bottom
+                .db     4
+                .dw     exe_rnd
+                .az     "rnd("
 .bottom         .dw     $0000           ; リンクポインタ$0000はテーブルの終端
 
 

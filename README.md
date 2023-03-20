@@ -56,7 +56,10 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
   - パラメータはありません。剰余演算を「負の無限大への切捨て除算」に設定します
   - 負の無限大への切捨て除算はMathematicaやR、Python、Rubyで使われている方法です
   - 例：-3 / 2 = 1.5 ですが、負の無限大に近い方に切り捨てられ -2 となります
-
+- rnd関数
+  - `rnd(数値または式)`
+  - 0〜指定した数値の間の乱数を返します
+  - 指定できる数値（引数）は1から32,767までです。負の数には対応していません
 
 ## 使い方
 上記URLの[SBC6303技術資料](http://www.amy.hi-ho.ne.jp/officetetsu/storage/sbc6303_techdata.pdf)を参考に簡易モニタ（monitor.hex）をROMに書き込んでください。  
