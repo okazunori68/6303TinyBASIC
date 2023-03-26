@@ -175,9 +175,6 @@ cold_start:
         clrb
         std     0,x             ; プログラムエリアの先頭を終端行（$0000）にする
         staa    <LineLength     ; 行の長さの上位バイトをゼロにする
-      ; // 各種フラグの初期化
-        staa    <ModuloMode     ; 剰余演算をtrunc（0への切捨て除算）にする
-        staa    <ToSubFlag      ; 分岐モードを0 = gotoにする
       ; // 変数領域の初期化
         ldx     #VARIABLE
 .loop   std     0,x
@@ -191,13 +188,19 @@ cold_start:
         ldd     #USER_AREA_BTM+2-USER_AREA_TOP
         lsrd
         std     <MaxSubscript
-      ; // スタックポインタの初期化
-        ldx     #SSTACK_BTM+1
-        stx     <SStackPtr
       ; // 乱数のSeed値の設定
 .seed   ldd     <FRC            ; Free run timer 読み出し
         beq     :seed           ; Seedはゼロ以外
         std     <RndNumber
+
+warm_start:
+      ; // スタックポインタの初期化
+        ldx     #SSTACK_BTM+1
+        stx     <SStackPtr
+      ; // 各種フラグの初期化
+        clra
+        staa    <ModuloMode     ; 剰余演算をtrunc（0への切捨て除算）にする
+        staa    <ToSubFlag      ; 分岐モードを0 = gotoにする
 
 
 tb_main:
@@ -464,7 +467,7 @@ eol_process:
         abx                     ; 次の行の先頭アドレスを取得
         stx     <ExeLineAddr    ; 次の行の先頭アドレスを保存
         rts
-.end    jmp     tb_main         ; directモードであればそのまま終了
+.end    jmp     warm_start      ; directモードであればそのまま終了
 
 
 ; -----------------------------------------------------------------------
@@ -1315,7 +1318,7 @@ exe_run:
         inx
         jsr     exe_line        ; 一行実行
         bra     :loop
-.end    jmp     tb_main
+.end    jmp     warm_start
 
 
 ; -----------------------------------------------------------------------
@@ -1823,10 +1826,14 @@ SMT_TABLE
                 .db     5
                 .dw     exe_gosub
                 .az     "gosub"
-.return         .dw     :trunc
+.return         .dw     :end
                 .db     6
                 .dw     exe_return
                 .as     "return"        ; 6文字なので終端不要。'.as'を使用する
+.end            .dw     :trunc
+                .db     3
+                .dw     warm_start
+                .az     "end"
 .trunc          .dw     :floor
                 .db     5
                 .dw     exe_trunc
@@ -1873,7 +1880,7 @@ write_err_msg:
 .2      jsr     write_crlf
         ldx     <StackPointer
         txs
-        jmp     tb_main
+        jmp     warm_start
 
 ERRMSG1 .az     "Oops! "
 ERRMSG2 .az     " in "

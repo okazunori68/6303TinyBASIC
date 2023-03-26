@@ -47,6 +47,9 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 - return文
   - パラメータはありません
   - 呼び出したgosub文の直後に実行を移します
+- end文
+  - パラメータはありません
+  - プログラムの実行を終了します
 - trunc文
   - パラメータはありません。剰余演算を「0への切捨て除算」に設定します
   - 0への切捨て除算はCやGO、Swift、MSX-BASICなど大半の言語で使われている方法です
