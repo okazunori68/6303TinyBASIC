@@ -45,6 +45,8 @@ LF              .eq     $0a     ; Line Feed
 DEL             .eq     $7f     ; Delete
 XON             .eq     $11     ; DC1
 XOFF            .eq     $13     ; DC3
+ESC             .eq     $1b     ; Escape
+APOSTROPHE      .eq     $27     ; Apostrophe
 
 RAM_START       .eq     $0020
 RAM_END         .eq     $1fff
@@ -152,7 +154,7 @@ SSTACK          .bs     40      ; サブルーチンスタック (Subroutine sta
 SSTACK_BTM      .eq     *-1
 SSTACK_SIZE     .eq     SSTACK_BTM-SSTACK+1
         .or     $02c2
-VARIABLE        .bs     52      ; 変数26文字 ($01c2-01f5)
+VARIABLE        .bs     52      ; 変数26文字 ($02c2-02f5)
 VARIABLE_END    .eq     *-1
 VARIABLE_SIZE   .eq     VARIABLE_END-VARIABLE+1
 
@@ -165,6 +167,10 @@ VARIABLE_SIZE   .eq     VARIABLE_END-VARIABLE+1
 init_tinybasic:
         tsx
         stx     <StackPointer
+        ldx     #ESC_CLEAR
+        jsr     write_line
+        ldx     #MSG_TBSTART
+        jsr     write_line
 
 
 cold_start:
@@ -204,7 +210,9 @@ warm_start:
 
 
 tb_main:
-        oim     #1,<ExeStateFlag ; 実行状態フラグをdirectに設定
+        ldx     #MSG_OK
+        jsr     write_line
+prompt: oim     #1,<ExeStateFlag ; 実行状態フラグをdirectに設定
         ldab    #'>'
         jsr     write_char
         jsr     read_line
@@ -386,7 +394,7 @@ long_length:                    ; 入力行の長さ > 既存行の長さ
 ; 入力行と既存の行が同じ長さの場合
 same_length:
         bsr     insert_new_line
-        jmp     tb_main
+        jmp     prompt
 
 ; 入力行が既存の行より短い場合
 short_Length:
@@ -426,7 +434,7 @@ array_index:
         subd    <ArrayAddr
         lsrd
         std     <MaxSubscript
-        jmp     tb_main
+        jmp     prompt
 
 
 ; -----------------------------------------------------------------------
@@ -480,6 +488,8 @@ eol_process:
 exe_line:
         jsr     skip_space
         beq     eol_process     ; 終端文字（$00）ならば終了処理
+        cmpb    #APOSTROPHE     ; "'"であれば行末まで読み飛ばす
+        beq     eol_process
       ; // 配列変数のチェック
         cmpb    #'@'
         bne     :var            ; 配列変数でなければ変数のチェックへ
@@ -1394,10 +1404,15 @@ exe_print:
 ; -----------------------------------------------------------------------
 ; input文を実行する
 ; Execute 'input' statement
+;【引数】X:実行位置アドレス
+;【使用】B, X（下位ルーチンでA）
+;【返値】なし
 ; -----------------------------------------------------------------------
 exe_input:
         jsr     skip_space
-        beq     :end            ; 終端文字なら改行して終了
+        beq     :err00          ; 終端文字ならエラー
+        cmpb    #':'            ; ":"ならエラー
+        beq     :err00
         jsr     write_quoted_str ; 引用符があれば文字列を出力する
         bcc     :1
         ldab    0,x
@@ -1422,7 +1437,7 @@ exe_input:
         ldx     #TEXT_BFFR
         jsr     assign_to_var   ; 入力された内容を変数に代入
         ldx     <ExePointer     ; 実行位置アドレスを復帰
-.end    jmp     is_multi
+        jmp     is_multi
 .err00  clra                    ; "Syntax error"
         jmp     write_err_msg
 
@@ -1435,13 +1450,17 @@ exe_input:
 ;【返値】なし
 ; -----------------------------------------------------------------------
 exe_if: jsr     skip_space      ; 空白を読み飛ばし
-        beq     :end            ; 終端文字なら終了
+        beq     :err00          ; 終端文字ならエラー
+        cmpb    #':'            ; ":"ならエラー
+        beq     :err00
         jsr     eval_expression ; 式評価
         bcc     :err04
         tstb                    ; 真偽値はゼロか否かなので下位8bitのみで判断
         beq     :end
         jmp     exe_line        ; True
 .end    jmp     eol_process     ; Falseならば全て無視され行末の処理へ
+.err00  clra                    ; "Syntax error"
+        jmp     write_err_msg
 .err04  ldaa    #4              ; "Illegal expression"
         jmp     write_err_msg
 
@@ -1496,7 +1515,7 @@ exe_goto:
         ldx     #USER_AREA_TOP  ; 現在の行番号 < 飛び先の行番号 = 先頭から検索
 .1      jsr     scan_line_num   ; 同じ行番号を探す
         bcc     :err16          ; "Undefined line number"
-        stx     <ExeLineAddr    ; 実行中の行の先頭アドレスを保存
+        stx     <ExeLineAddr    ; 飛び先の先頭アドレスを保存
         inx
         inx
         inx
@@ -1616,7 +1635,7 @@ exe_rnd:
         jmp     write_err_msg
 
 
-; ------------------------------------------------
+; -----------------------------------------------------------------------
 ; ブロック転送
 ; Move memory
 ;【引数】Source:転送元アドレス
@@ -1624,7 +1643,7 @@ exe_rnd:
 ;        Bytes:転送バイト数
 ;【使用】A, B, X, UR0
 ;【返値】なし
-; ------------------------------------------------
+; -----------------------------------------------------------------------
 mem_move:
         ldd     <Bytes
         beq     :end            ; 転送バイト数が0ならば即終了
@@ -1635,7 +1654,7 @@ mem_move:
         bra     LDDR            ; Source < Destination
 .end    rts
 
-; ------------------------------------------------
+; -----------------------------------------------------------------------
 ; 前方から転送（LDIR）
 ; Load, Increment and Repeat
 ;【引数】Source:転送元アドレス
@@ -1643,7 +1662,7 @@ mem_move:
 ;        Bytes:転送バイト数
 ;【使用】A, B, X, UR0
 ;【返値】なし
-; ------------------------------------------------
+; -----------------------------------------------------------------------
 LDIR:
 .Offset .eq     UR0
        ; // オフセットの計算。既にDレジスタに入っている
@@ -1684,7 +1703,7 @@ LDIR:
         bne     :loop
         rts
 
-; ------------------------------------------------
+; -----------------------------------------------------------------------
 ; 後方から転送（LDDR）
 ; Load, Decrement and Repeat
 ;【引数】Source:転送元アドレス
@@ -1692,7 +1711,7 @@ LDIR:
 ;        Bytes:転送バイト数
 ;【使用】A, B, X, UR0
 ;【返値】なし
-; ------------------------------------------------
+; -----------------------------------------------------------------------
 LDDR:
 .Offset .eq     UR0
       ; // オフセットの計算
@@ -1908,6 +1927,14 @@ ERRCODE .dw     .err00
 .err18  .az     "Subroutine stack overflow"
 .err20  .az     "Return without gosub"
 .err22  .az     "Subscript is out of range"
+
+
+; ***********************************************************************
+;   文字列 Strings
+; ***********************************************************************
+ESC_CLEAR       .az     #ESC,"[2J",#ESC,"[1;1H"
+MSG_TBSTART     .az     "6303 Tiny BASIC",#CR,#LF
+MSG_OK          .az     "OK",#CR,#LF
 
 
 ; ***********************************************************************

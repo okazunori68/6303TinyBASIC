@@ -9,7 +9,7 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 現在は下記の機能を実装しています。
 
 - 四則演算。`%`で剰余（mod）
-  - 数値は16bit符号付き整数のみ。オーバーフロー判定は行いません
+  - 数値は16bit符号付き整数（-32,768〜32,767）のみ。オーバーフロー判定は行いません
   - 四則演算の優先順位に対応しています
   - 括弧も使えます
 - 比較演算。演算子は`=, <>, <, <=, >, >=`の6種類
@@ -20,6 +20,8 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
   - 添字は0から32,767までの数値または式です。
   - 配列はBASICプログラム終端直後から添字順に保存されます
   - 添字の最大値は残りRAMに依存します。これを超えると"Subscript is out of range"エラーとなります
+- コメント
+  - `'`以降の文字列はコメントとなり行末まで読み飛ばします
 - listコマンド
   - パラメータはありません。保存されたプログラムを全行表示します
 - runコマンド
@@ -69,14 +71,17 @@ The SBC6303 is a single board computer operating with the Hitachi HD6303.
 SBC6303を起動し、プログラム（tinybasic.s19）を'l'コマンドで読み込ませてください。  
 **$0000〜$1fffまでのRAM（8Kバイト）が必要です。**  
 
-XON/XOFFフロー制御を実装しています。  
-ターミナルソフトのソフトウェアフロー制御を有効にしてください。  
-テキスト貼り付け時の遅延は不要です
+- 通信速度は76,800bpsに設定してください
+- XON/XOFFフロー制御を実装しています
+- ターミナルソフトのソフトウェアフロー制御を有効にしてください
+- テキスト貼り付け時の遅延は不要です
+- ターミナルからの改行コードは「CR+LF」としてください
+- CoolTermおよびTera Termの設定を下記に示します
 
-<img src="https://user-images.githubusercontent.com/71197813/222955274-b7882104-1cb3-44aa-a13e-ca898f8a2c41.png" width="500">
-<img src="https://user-images.githubusercontent.com/71197813/222955303-f1ad71e8-6ac7-4971-a552-dbfc27dbfb9d.png" width="500">
+<img src="https://user-images.githubusercontent.com/71197813/227758427-6117c90a-7ec1-42b4-95a6-cfcc7e1c5a58.png" width="500">
+<img src="https://user-images.githubusercontent.com/71197813/227772393-b6c96eef-e2ad-4074-85a9-51d6304ef527.png" width="500">
 <img src="https://user-images.githubusercontent.com/71197813/222435459-4208a819-0e17-4004-9b11-5b69cd56a0ba.png">
-<img src="https://user-images.githubusercontent.com/71197813/222435482-cddbb36f-da3f-491e-a950-f9972f95333c.png">
+<img src="https://user-images.githubusercontent.com/71197813/227758532-db4d4448-2ca3-45d5-8236-6fa675c36316.png">
 
 ## 開発環境
 - macOS Monterey
